@@ -1221,7 +1221,7 @@ function EmojiPicker({ onSelect, onClose }: { onSelect: (emoji: string) => void,
   );
 }
 
-function AddItemForm({ onAdd, onCancel, categoryOptions, addCategoryOption, expirySettings, locationOptions, addLocationOption, unitOptions, addUnitOption, emojiHistory, updateEmojiHistory }: any) {
+function AddItemForm({ onAdd, categoryOptions, addCategoryOption, expirySettings, locationOptions, addLocationOption, unitOptions, addUnitOption, emojiHistory, updateEmojiHistory }: any) {
   const [step, setStep] = useState(1);
   const [data, setData] = useState<any>({
     storage: 'refrigerator',
