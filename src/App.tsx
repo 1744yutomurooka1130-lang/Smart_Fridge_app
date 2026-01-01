@@ -7,7 +7,7 @@ import {
   IceCream, Carrot, Settings, Edit3, ArrowUpDown, X,
   CheckSquare, Square, Minus, MessageSquare,
   History, ChevronLeft, Clock, TrendingDown,
-  AlertOctagon, Ban
+  AlertOctagon, Ban, Save
 } from 'lucide-react';
 
 // --- モックデータと型定義 ---
@@ -405,7 +405,6 @@ export default function App() {
               showToast(`${newItem.name} を追加しました`);
               setActiveTab('inventory');
             }} 
-            onCancel={() => setActiveTab('dashboard')}
           />
         )}
         {activeTab === 'recipes' && (
@@ -460,7 +459,7 @@ export default function App() {
   );
 }
 
-// ... existing Navigation, Header ...
+// ... Navigation, Header ...
 
 function Navigation({ activeTab, setActiveTab, counts }: any) {
   const tabs = [
@@ -1000,7 +999,7 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
           </div>
         ) : isGrouped ? (
           // カテゴリーごとのグループ表示
-          // otherは最後に表示
+          // otherは最後に表示 (キー重複修正: filterでotherを除外し、末尾に手動追加)
           [...Object.keys(CATEGORY_LABELS).filter(k => k !== 'other'), 'other'].map((catKey) => {
             const categoryItems = filteredItems.filter((item: FoodItem) => (item.category || 'other') === catKey);
             const sortedGroupItems = getSortedItems(categoryItems);
@@ -1050,7 +1049,7 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
 // ... existing SettingsScreen, EmojiPicker, AddItemForm, RecipeGenerator, ShoppingList, ScannerModal ...
 function SettingsScreen({ categoryOptions, expirySettings, setExpirySettings, stockThresholds, setStockThresholds, showToast }: any) {
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<'expiry' | 'stock'>('expiry');
+  const [activeTab, setActiveTab] = useState<'expiry' | 'stock'>('expiry'); // 設定タブ切り替え
 
   const handleExpiryChange = (item: string, days: number) => {
     setExpirySettings((prev: any) => ({
@@ -1066,6 +1065,7 @@ function SettingsScreen({ categoryOptions, expirySettings, setExpirySettings, st
     }));
   };
 
+  // フィルタリングロジック
   const filteredCategoryOptions = useMemo(() => {
     if (!searchTerm) return categoryOptions;
 
@@ -1085,11 +1085,13 @@ function SettingsScreen({ categoryOptions, expirySettings, setExpirySettings, st
   return (
     <div className="space-y-6">
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+        
         <h3 className="font-bold text-xl mb-4 flex items-center gap-2">
           <Settings className="w-6 h-6 text-gray-600" />
           アプリ設定
         </h3>
 
+        {/* 設定タブ */}
         <div className="flex bg-gray-100 p-1 rounded-xl mb-6">
           <button 
             onClick={() => setActiveTab('expiry')}
@@ -1118,6 +1120,7 @@ function SettingsScreen({ categoryOptions, expirySettings, setExpirySettings, st
           }
         </p>
 
+        {/* 検索ボックス */}
         <div className="mb-6 relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
           <input 
