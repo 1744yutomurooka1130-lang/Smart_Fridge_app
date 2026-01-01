@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* カレンダーなどの横スクロール用 */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+```
+
+#### 3. コードの貼り付け
+私が作成した `FoodManagerApp.tsx` の中身を、プロジェクト内の `src/App.tsx` にすべて上書きコピー＆ペーストします。
+（ファイル名の拡張子が `.tsx` になっていることを確認してください）
+
+#### 4. 動作確認と公開（デプロイ）
+まずはPC上で動くか確認します。
+
+```bash
+npm run dev
