@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Camera, Search, Plus, Calendar, ChefHat, 
   ShoppingCart, AlertTriangle, Check, Trash2, 
@@ -7,8 +7,10 @@ import {
   IceCream, Carrot, Settings, Edit3, ArrowUpDown, X,
   CheckSquare, Square, Minus, MessageSquare,
   History, ChevronLeft, Clock, TrendingDown,
-  AlertOctagon, Ban, Save
+  AlertOctagon, Ban, Save, Scan, FileText, Loader2
 } from 'lucide-react';
+import { Html5QrcodeScanner } from "html5-qrcode";
+import Tesseract from 'tesseract.js';
 
 // --- モックデータと型定義 ---
 
@@ -39,14 +41,12 @@ interface ShoppingItem {
   addedDate: string;
 }
 
-// レシピ用材料型定義
 interface RecipeMaterial {
   name: string;
   amount: number;
   unit: string;
 }
 
-// レシピ型定義
 interface Recipe {
   id: string;
   title: string;
@@ -60,7 +60,6 @@ interface Recipe {
   allMaterials: RecipeMaterial[];
 }
 
-// 数量表示の整形ヘルパー関数
 const formatAmountStr = (amount: number, unit: string) => {
   const nonNumericUnits = ['少々', '適量', 'お好みで', 'ひとつまみ', '適宜'];
   if (nonNumericUnits.includes(unit)) {
@@ -74,21 +73,16 @@ const INITIAL_ITEMS: FoodItem[] = [
   { id: '1', name: '牛乳', storage: 'refrigerator', category: 'dairy', categorySmall: '牛乳', location: 'ドアポケット', expiryDate: new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0], quantity: 1, unit: '本', addedDate: '2023-10-25', emoji: '🥛' },
   { id: '2', name: '卵', storage: 'refrigerator', category: 'egg', categorySmall: '卵', location: '上段', expiryDate: new Date(Date.now() + 86400000 * 5).toISOString().split('T')[0], quantity: 2, unit: '個', addedDate: '2023-10-20', emoji: '🥚' },
   { id: '3', name: '豚バラ肉', storage: 'freezer_main', category: 'meat', categorySmall: '豚肉', location: '上段トレー', expiryDate: new Date(Date.now() + 86400000 * 20).toISOString().split('T')[0], quantity: 200, unit: 'g', addedDate: '2023-10-15', emoji: '🥩' },
-  { id: '4', name: '冷凍うどん', storage: 'freezer_sub', category: 'other', categorySmall: '冷凍うどん', location: '製氷室横', expiryDate: new Date(Date.now() + 86400000 * 25).toISOString().split('T')[0], quantity: 2, unit: '玉', addedDate: '2023-10-10', emoji: '🍜' },
-  { id: '5', name: 'キャベツ', storage: 'vegetable', category: 'vegetable', categorySmall: 'キャベツ', location: '下段', expiryDate: new Date(Date.now() - 86400000 * 1).toISOString().split('T')[0], quantity: 0.5, unit: '玉', addedDate: '2023-10-18', emoji: '🥬' },
-  { id: '6', name: '玉ねぎ', storage: 'ambient', category: 'vegetable', categorySmall: '玉ねぎ', location: 'カゴ', expiryDate: new Date(Date.now() + 86400000 * 14).toISOString().split('T')[0], quantity: 3, unit: '個', addedDate: '2023-10-18', emoji: '🧅' },
 ];
 
 const INITIAL_SHOPPING_LIST: ShoppingItem[] = [
   { id: 's1', name: '醤油', quantity: 1, unit: '本', isChecked: false, addedDate: '2023-10-25' },
-  { id: 's2', name: 'マヨネーズ', quantity: 1, unit: '本', isChecked: false, addedDate: '2023-10-26' }
 ];
 
 const INITIAL_UNIT_OPTIONS = [
   '個', '本', 'g', 'kg', 'ml', 'L', 'パック', '玉', '袋', '束', '枚', '切れ', '缶', '瓶', '箱', '少々', '適量'
 ];
 
-// 絵文字ライブラリ
 const EMOJI_LIBRARY: Record<string, string[]> = {
   '野菜・果物': ['🥦', '🥬', '🥒', '🌽', '🥕', '🥔', '🍠', '🍆', '🍅', '🍄', '🧅', '🧄', '🥗', '🌶️', '🫑', '🥑', '🍎', '🍏', '🍐', '🍊', '🍋', '🍌', '🍉', '🍇', '🍓', '🫐', '🍈', '🍒', '🍑', '🥭', '🍍', '🥥', '🥝', '🫒', '🥜', '🌰', '🫘', '🌿', '🌾', '🎋', '🍃', '🍂', '🍁', '🎍', '🪵', '🌵', '☘️', '🌱', '🪴', '🌻', '🌹', '🪷'],
   '肉・魚・卵': ['🥩', '🍗', '🥓', '🍖', '🍔', '🌭', '🐟', '🐠', '🐡', '🦐', '🦞', '🦀', '🦑', '🐙', '🍣', '🍱', '🥚', '🍳', '🦈', '🐳', '🐋', '🐬', '🦪', '🍥', '🍤', '🦃', '🐓', '🐖', '🐄', '🐂', '🐃', '🐑', '🐐', '🦌', '🐗'],
@@ -98,7 +92,6 @@ const EMOJI_LIBRARY: Record<string, string[]> = {
   'その他': ['📦', '🍱', '🥡', '🥫', '🛍️', '🛒', '🎁', '🍽️', '🍴', '🔪', '🔥', '❄️', '⚡', '🧺', '🧻', '🧼', '🧽', '🧹', '🗑️', '💊', '🩹', '🌡️', '🧸', '🎈', '🎉']
 };
 
-// 絵文字推測用キーワードマップ
 const EMOJI_KEYWORDS: Record<string, string> = {
   '牛': '🥩', '豚': '🥩', '鶏': '🍗', '肉': '🥩', 'ハム': '🥩', 'ソーセージ': '🌭', 'ベーコン': '🥓', 'ミンチ': '🥩', 'ステーキ': '🥩', '焼肉': '🥩',
   '魚': '🐟', '鮭': '🐟', '鯖': '🐟', '鯵': '🐟', '鰯': '🐟', '鮪': '🐟', '刺身': '🐟', '切り身': '🐟',
@@ -130,7 +123,6 @@ const EMOJI_KEYWORDS: Record<string, string> = {
   '豆腐': '🧊', '納豆': '🥢', 'こんにゃく': '🧊', 'ちくわ': '🥢', 'かまぼこ': '🍥', '缶詰': '🥫', 'ジャム': '🫙'
 };
 
-// 食材同義語辞書
 const INGREDIENT_SYNONYMS: Record<string, string[]> = {
   '米': ['ご飯', '白米', 'ライス'],
   'ご飯': ['米', '白米', 'ライス'],
@@ -147,7 +139,6 @@ const INGREDIENT_SYNONYMS: Record<string, string[]> = {
   '玉ねぎ': ['タマネギ', 'たまねぎ']
 };
 
-// カテゴリーラベル
 const CATEGORY_LABELS: Record<string, string> = {
   dairy: '🥛 乳製品',
   egg: '🥚 卵',
@@ -184,7 +175,6 @@ const DEFAULT_EXPIRY_DAYS: Record<string, number> = {
   'りんご': 14, 'バナナ': 4, 'みかん': 7 
 };
 
-// 在庫アラートのデフォルト閾値
 const DEFAULT_STOCK_THRESHOLDS: Record<string, number> = {
   '卵': 3,
   '牛乳': 1,
@@ -206,7 +196,7 @@ export default function App() {
   const [unitOptions, setUnitOptions] = useState<string[]>(INITIAL_UNIT_OPTIONS);
   
   const [expirySettings, setExpirySettings] = useState<Record<string, number>>(DEFAULT_EXPIRY_DAYS);
-  const [stockThresholds, setStockThresholds] = useState<Record<string, number>>(DEFAULT_STOCK_THRESHOLDS); // 在庫閾値設定
+  const [stockThresholds, setStockThresholds] = useState<Record<string, number>>(DEFAULT_STOCK_THRESHOLDS);
   const [emojiHistory, setEmojiHistory] = useState<Record<string, string>>(() => {
     const history: Record<string, string> = {};
     INITIAL_ITEMS.forEach(item => {
@@ -215,9 +205,7 @@ export default function App() {
     return history;
   });
 
-  // 在庫管理の表示モード
   const [inventoryFilterMode, setInventoryFilterMode] = useState<FilterMode>('all');
-
   const [showScannerModal, setShowScannerModal] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
 
@@ -307,7 +295,6 @@ export default function App() {
     }));
   };
 
-  // 在庫不足アイテムの計算ロジック (閾値未設定のものは除外)
   const lowStockItems = useMemo(() => {
     const groupedStock: Record<string, number> = {};
     items.forEach(item => {
@@ -318,7 +305,6 @@ export default function App() {
     const lowStockList: string[] = [];
     Object.keys(stockThresholds).forEach(key => {
       const threshold = stockThresholds[key];
-      // 閾値が有効な数値で、かつ0より大きい場合のみ判定する
       if (typeof threshold === 'number' && threshold > 0) {
         const currentStock = groupedStock[key] || 0;
         if (currentStock < threshold) { 
@@ -494,11 +480,9 @@ function Navigation({ activeTab, setActiveTab, counts }: any) {
             >
               <div className="relative">
                 <tab.icon className="w-6 h-6" />
-                {/* 期限切れバッジ */}
                 {tab.id === 'inventory' && counts.expired > 0 && (
                   <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white"></span>
                 )}
-                {/* 在庫不足バッジ (NEW) */}
                 {tab.id === 'inventory' && counts.expired === 0 && counts.lowStock > 0 && (
                   <span className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></span>
                 )}
@@ -526,11 +510,9 @@ function Navigation({ activeTab, setActiveTab, counts }: any) {
               <>
                 <div className="relative">
                   <tab.icon className="w-6 h-6 mb-1" />
-                   {/* 期限切れバッジ */}
-                  {tab.id === 'inventory' && counts.expired > 0 && (
+                   {tab.id === 'inventory' && counts.expired > 0 && (
                     <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full"></span>
                   )}
-                  {/* 在庫不足バッジ */}
                   {tab.id === 'inventory' && counts.expired === 0 && counts.lowStock > 0 && (
                     <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-blue-500 rounded-full"></span>
                   )}
@@ -576,7 +558,6 @@ function Header({ activeTab, setShowScannerModal }: any) {
   );
 }
 
-// Dashboard更新 (各カードクリックでの遷移設定)
 function Dashboard({ items, counts, setActiveTab, setInventoryFilterMode }: any) {
   const dates = Array.from({ length: 14 }, (_, i) => {
     const d = new Date();
@@ -712,23 +693,15 @@ function Dashboard({ items, counts, setActiveTab, setInventoryFilterMode }: any)
   );
 }
 
-// ItemCard更新 (thresholdプロパティ追加, 色ロジック変更)
 const ItemCard = ({ item, deleteItem, onAddToShoppingList, isLowStock, threshold }: { item: FoodItem, deleteItem: (id: string) => void, onAddToShoppingList: (name: string, quantity?: number, unit?: string) => void, isLowStock?: boolean, threshold?: number }) => {
-  // 色判定ロジック
   const getStatusColor = (dateStr: string, lowStock?: boolean, quantity?: number) => {
     const today = new Date().toISOString().split('T')[0];
     const threeDays = new Date(Date.now() + 86400000 * 3).toISOString().split('T')[0];
     
-    // 在庫切れ (0個) -> グレー背景
     if (quantity === 0) return 'bg-gray-100 border-gray-300 text-gray-500';
-
-    // 期限切れ -> 赤
     if (dateStr < today) return 'bg-red-50 border-red-200 text-red-800';
-    // 期限間近 -> 黄
     if (dateStr <= threeDays) return 'bg-yellow-50 border-yellow-200 text-yellow-800';
-    // 在庫少 -> 水色 (優先順位は期限より低い)
     if (lowStock) return 'bg-blue-50 border-blue-200 text-blue-800'; 
-    
     return 'bg-white border-gray-100 text-gray-800';
   };
 
@@ -748,7 +721,6 @@ const ItemCard = ({ item, deleteItem, onAddToShoppingList, isLowStock, threshold
         <div>
           <h4 className="font-bold text-lg leading-tight flex items-center gap-2">
             {item.name}
-            {/* 在庫切れバッジ (NEW) */}
             {item.quantity === 0 ? (
               <span className="text-[10px] bg-gray-600 text-white px-1.5 py-0.5 rounded flex items-center gap-0.5 whitespace-nowrap">
                 <Ban className="w-3 h-3" />
@@ -762,7 +734,6 @@ const ItemCard = ({ item, deleteItem, onAddToShoppingList, isLowStock, threshold
             )}
           </h4>
           <div className="flex gap-2 text-xs opacity-80 mt-1 flex-wrap">
-            {/* 在庫切れ時は場所を表示しないか「-」にする */}
             <span className="bg-white/50 px-1.5 py-0.5 rounded border border-black/10">
               {item.quantity === 0 ? '-' : item.location}
             </span>
@@ -774,7 +745,6 @@ const ItemCard = ({ item, deleteItem, onAddToShoppingList, isLowStock, threshold
         </div>
       </div>
       <div className="text-right flex flex-col justify-between h-full">
-        {/* 在庫切れでない場合のみ期限を表示 */}
         {item.quantity > 0 && item.expiryDate && (
           <>
             <div className="text-sm font-bold">{item.expiryDate.slice(5).replace('-','/')}まで</div>
@@ -790,7 +760,6 @@ const ItemCard = ({ item, deleteItem, onAddToShoppingList, isLowStock, threshold
           >
             <ShoppingCart className="w-4 h-4" />
           </button>
-          {/* 在庫切れ（仮アイテム）の場合は削除ボタンを表示しない */}
           {item.id !== 'temp' && !item.id.startsWith('temp') && (
             <button 
               onClick={(e) => { e.stopPropagation(); deleteItem(item.id); }}
@@ -806,29 +775,20 @@ const ItemCard = ({ item, deleteItem, onAddToShoppingList, isLowStock, threshold
   );
 }
 
-// InventoryList更新 (フィルタ機能強化 & ダミーデータ生成ロジック変更)
 function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, stockThresholds, inventoryFilterMode, setInventoryFilterMode }: any) {
   const [filter, setFilter] = useState<StorageType | 'all'>('all');
   const [sortBy, setSortBy] = useState<'expiry' | 'added' | 'name'>('expiry');
   const [isGrouped, setIsGrouped] = useState(true);
 
-  // 表示用アイテムリストの生成
   const displayItems = useMemo(() => {
     let baseItems = [...items];
 
-    // 在庫少モードの場合、リストにない（在庫0）アイテムも生成して追加する
     if (inventoryFilterMode === 'lowStock') {
-       // 現在のアイテムリストにある名前セット
        const existingNames = new Set(items.map((i: any) => i.categorySmall || i.name));
-       
-       // lowStockItems (名前リスト) の中で、itemsに含まれていないものを探す
        const missingNames = lowStockItems.filter((name: string) => !existingNames.has(name));
        
-       // 不足アイテムのダミーデータを生成
        const missingFoodItems: FoodItem[] = missingNames.map((name: string) => {
-         // 推測ロジックを再利用して絵文字などを埋める
          let determinedEmoji = '📦';
-         // デフォルトカテゴリーは 'other' にしておく
          let determinedCategory: ItemCategory = 'other';
          
          for (const [key, emoji] of Object.entries(EMOJI_KEYWORDS)) {
@@ -841,13 +801,13 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
          return {
            id: `temp-${name}`, 
            name: name,
-           storage: 'ambient', // 仮
+           storage: 'ambient', 
            category: determinedCategory,
            categorySmall: name,
-           location: '', // 空文字に設定
-           expiryDate: '', // 期限なし
+           location: '', 
+           expiryDate: '', 
            quantity: 0,
-           unit: '個', // 仮
+           unit: '個', 
            addedDate: '',
            emoji: determinedEmoji
          };
@@ -860,9 +820,7 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
   }, [items, inventoryFilterMode, lowStockItems]);
 
 
-  // 1. フィルタリング (モードによる絞り込み)
   const filteredItems = displayItems.filter((item: any) => {
-    // モード別フィルタ
     if (inventoryFilterMode === 'lowStock') {
        const key = item.categorySmall || item.name;
        return lowStockItems.includes(key);
@@ -879,15 +837,12 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
       return item.expiryDate >= today && item.expiryDate <= threeDaysLater && item.quantity > 0;
     }
 
-    // 通常モード (all)
     return filter === 'all' ? true : item.storage === filter;
   });
 
-  // 2. ソート関数
   const getSortedItems = (itemsToSort: FoodItem[]) => {
     const sorted = [...itemsToSort];
     if (sortBy === 'expiry') {
-      // 期限がない（在庫0）アイテムは後ろへ
       sorted.sort((a, b) => {
         if (!a.expiryDate) return 1;
         if (!b.expiryDate) return -1;
@@ -910,7 +865,6 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
     { id: 'ambient', label: '常温', icon: Sun },
   ];
 
-  // モード切り替えタブ
   const modeTabs: { id: FilterMode, label: string, icon: any, color: string }[] = [
     { id: 'all', label: 'すべて', icon: LayoutDashboard, color: 'bg-gray-100 text-gray-600' },
     { id: 'expired', label: '期限切れ', icon: AlertTriangle, color: 'bg-red-100 text-red-600' },
@@ -920,8 +874,6 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
 
   return (
     <div className="space-y-4">
-      
-      {/* 表示モード切り替えタブ (NEW) */}
       <div className="grid grid-cols-4 gap-2 bg-white p-2 rounded-xl shadow-sm border border-gray-100">
         {modeTabs.map((tab) => (
           <button
@@ -939,7 +891,6 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
         ))}
       </div>
 
-      {/* フィルタ & ソート UI (通常モード時のみ場所フィルタを表示) */}
       <div className="flex flex-col gap-3">
         {inventoryFilterMode === 'all' && (
           <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
@@ -960,9 +911,7 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
           </div>
         )}
 
-        {/* ソート & グルーピング設定 */}
         <div className="flex flex-wrap justify-between items-center gap-3 bg-gray-50 p-3 rounded-xl border border-gray-100">
-           {/* カテゴリーまとめトグル */}
            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none hover:opacity-80 transition-opacity">
             <div className={`relative w-10 h-6 rounded-full transition-colors duration-200 ease-in-out ${isGrouped ? 'bg-green-500' : 'bg-gray-300'}`}>
               <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transform transition-transform duration-200 ease-in-out ${isGrouped ? 'translate-x-4' : 'translate-x-0'}`} />
@@ -976,7 +925,6 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
             <span className="font-bold text-xs sm:text-sm">カテゴリー</span>
           </label>
 
-          {/* ソート選択 */}
           <div className="flex items-center gap-2 ml-auto">
             <ArrowUpDown className="w-4 h-4 text-gray-500" />
             <select 
@@ -992,15 +940,12 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
         </div>
       </div>
 
-      {/* リスト表示 */}
       <div className="space-y-6">
         {filteredItems.length === 0 ? (
           <div className="text-center py-12 text-gray-400">
              <p>該当する食品はありません</p>
           </div>
         ) : isGrouped ? (
-          // カテゴリーごとのグループ表示
-          // otherは最後に表示 (キー重複修正: filterでotherを除外し、末尾に手動追加)
           [...Object.keys(CATEGORY_LABELS).filter(k => k !== 'other'), 'other'].map((catKey) => {
             const categoryItems = filteredItems.filter((item: FoodItem) => (item.category || 'other') === catKey);
             const sortedGroupItems = getSortedItems(categoryItems);
@@ -1028,7 +973,6 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
             );
           })
         ) : (
-          // フラット表示 (全体ソート)
           <div className="grid gap-0 animate-fade-in-up">
             {getSortedItems(filteredItems).map((item: FoodItem) => (
               <ItemCard 
@@ -1047,10 +991,9 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
   );
 }
 
-// ... existing SettingsScreen, EmojiPicker, AddItemForm, RecipeGenerator, ShoppingList, ScannerModal ...
 function SettingsScreen({ categoryOptions, expirySettings, setExpirySettings, stockThresholds, setStockThresholds, showToast }: any) {
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<'expiry' | 'stock'>('expiry'); // 設定タブ切り替え
+  const [activeTab, setActiveTab] = useState<'expiry' | 'stock'>('expiry');
 
   const handleExpiryChange = (item: string, days: number) => {
     setExpirySettings((prev: any) => ({
@@ -1066,7 +1009,6 @@ function SettingsScreen({ categoryOptions, expirySettings, setExpirySettings, st
     }));
   };
 
-  // フィルタリングロジック
   const filteredCategoryOptions = useMemo(() => {
     if (!searchTerm) return categoryOptions;
 
@@ -1086,13 +1028,11 @@ function SettingsScreen({ categoryOptions, expirySettings, setExpirySettings, st
   return (
     <div className="space-y-6">
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-        
         <h3 className="font-bold text-xl mb-4 flex items-center gap-2">
           <Settings className="w-6 h-6 text-gray-600" />
           アプリ設定
         </h3>
 
-        {/* 設定タブ */}
         <div className="flex bg-gray-100 p-1 rounded-xl mb-6">
           <button 
             onClick={() => setActiveTab('expiry')}
@@ -1121,7 +1061,6 @@ function SettingsScreen({ categoryOptions, expirySettings, setExpirySettings, st
           }
         </p>
 
-        {/* 検索ボックス */}
         <div className="mb-6 relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
           <input 
@@ -1578,19 +1517,15 @@ function AddItemForm({ onAdd, onCancel, categoryOptions, addCategoryOption, expi
               <p className="text-xs text-green-600 mt-1">✨ 設定された日数（{expirySettings[data.categorySmall] || '?'}日）から自動計算</p>
             </div>
 
-            {/* キャンセルボタンを追加し、onCancelを呼び出す */}
             <div className="flex gap-3 pt-4">
               <button 
                 type="button" 
                 onClick={onCancel} 
                 className="flex-1 py-3 text-gray-500 font-bold bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors"
               >
-                戻る
+                キャンセル
               </button>
-              <button 
-                type="submit" 
-                className="flex-1 py-3 bg-green-500 text-white rounded-xl font-bold shadow-md hover:bg-green-600 transition-colors"
-              >
+              <button type="submit" className="flex-1 py-3 bg-green-500 text-white rounded-xl font-bold shadow-md hover:bg-green-600">
                 登録する
               </button>
             </div>
@@ -1607,502 +1542,6 @@ function AddItemForm({ onAdd, onCancel, categoryOptions, addCategoryOption, expi
           onClose={() => setShowEmojiPicker(false)}
         />
       )}
-    </div>
-  );
-}
-
-function RecipeGenerator({ items, onAddToShoppingList, history, onAddHistory }: any) {
-  const [loading, setLoading] = useState(false);
-  const [userRequest, setUserRequest] = useState('');
-  const [selectedRecipe, setSelectedRecipe] = useState<any>(null);
-
-  // 簡易レシピDB (材料オブジェクト化)
-  const RECIPE_DB = [
-    { title: "肉じゃが", materials: [
-      { name: "豚肉", amount: 200, unit: "g" },
-      { name: "じゃがいも", amount: 3, unit: "個" },
-      { name: "人参", amount: 1, unit: "本" },
-      { name: "玉ねぎ", amount: 2, unit: "個" },
-      { name: "醤油", amount: 1, unit: "少々" }, 
-      { name: "砂糖", amount: 1, unit: "少々" }  
-    ]},
-    { title: "野菜炒め", materials: [
-      { name: "豚肉", amount: 150, unit: "g" },
-      { name: "キャベツ", amount: 0.25, unit: "玉" },
-      { name: "人参", amount: 0.5, unit: "本" },
-      { name: "ピーマン", amount: 2, unit: "個" },
-      { name: "塩", amount: 1, unit: "少々" },
-      { name: "胡椒", amount: 1, unit: "少々" }
-    ]},
-    { title: "オムライス", materials: [
-      { name: "卵", amount: 2, unit: "個" },
-      { name: "鶏肉", amount: 100, unit: "g" },
-      { name: "玉ねぎ", amount: 0.5, unit: "個" },
-      { name: "ご飯", amount: 1, unit: "膳" },
-      { name: "ケチャップ", amount: 1, unit: "適量" } 
-    ]},
-    { title: "親子丼", materials: [
-      { name: "鶏肉", amount: 150, unit: "g" },
-      { name: "卵", amount: 2, unit: "個" },
-      { name: "ご飯", amount: 1, unit: "膳" },
-      { name: "玉ねぎ", amount: 0.5, unit: "個" },
-      { name: "醤油", amount: 1, unit: "少々" }, 
-      { name: "だし", amount: 1, unit: "少々" }  
-    ]},
-    { title: "カレーライス", materials: [
-      { name: "豚肉", amount: 200, unit: "g" },
-      { name: "じゃがいも", amount: 2, unit: "個" },
-      { name: "人参", amount: 1, unit: "本" },
-      { name: "玉ねぎ", amount: 2, unit: "個" },
-      { name: "カレールー", amount: 0.5, unit: "箱" },
-      { name: "ご飯", amount: 2, unit: "膳" }
-    ]},
-    { title: "豚の生姜焼き", materials: [
-      { name: "豚肉", amount: 200, unit: "g" },
-      { name: "玉ねぎ", amount: 0.5, unit: "個" },
-      { name: "生姜", amount: 1, unit: "かけ" },
-      { name: "醤油", amount: 1, unit: "少々" }, 
-      { name: "酒", amount: 1, unit: "少々" },   
-      { name: "みりん", amount: 1, unit: "少々" } 
-    ]},
-    { title: "冷やし中華", materials: [
-      { name: "中華麺", amount: 2, unit: "玉" },
-      { name: "ハム", amount: 4, unit: "枚" },
-      { name: "きゅうり", amount: 1, unit: "本" },
-      { name: "卵", amount: 1, unit: "個" },
-      { name: "トマト", amount: 1, unit: "個" },
-      { name: "冷やし中華のタレ", amount: 1, unit: "袋" }
-    ]},
-    { title: "味噌汁", materials: [
-      { name: "豆腐", amount: 0.5, unit: "丁" },
-      { name: "わかめ", amount: 1, unit: "少々" },
-      { name: "ネギ", amount: 0.25, unit: "本" },
-      { name: "味噌", amount: 1, unit: "少々" }, 
-      { name: "だし", amount: 1, unit: "少々" }  
-    ]}
-  ];
-
-  // 材料判定ロジック
-  const checkIngredients = (recipeMaterials: RecipeMaterial[], inventoryItems: FoodItem[]) => {
-    const present: RecipeMaterial[] = [];
-    const missing: RecipeMaterial[] = [];
-
-    recipeMaterials.forEach(mat => {
-      // 1. 名前(または同義語)が一致する在庫アイテムを全て抽出
-      const matchedItems = inventoryItems.filter(item => {
-        const itemName = item.categorySmall || item.name;
-        
-        // 名前部分一致チェック
-        let isMatch = itemName.includes(mat.name) || mat.name.includes(itemName);
-        
-        // 同義語チェック
-        if (!isMatch && INGREDIENT_SYNONYMS[mat.name]) {
-          isMatch = INGREDIENT_SYNONYMS[mat.name].some(syn => itemName.includes(syn) || syn.includes(itemName));
-        }
-        return isMatch;
-      });
-
-      if (matchedItems.length === 0) {
-        // 在庫なし
-        missing.push(mat);
-      } else {
-        // 在庫あり（詳細チェック）
-        // 単位が一致するアイテムがあるか確認
-        const sameUnitItems = matchedItems.filter(item => item.unit === mat.unit);
-        
-        if (sameUnitItems.length > 0) {
-          // 同じ単位の在庫がある場合、数量を合算して比較
-          const totalAmount = sameUnitItems.reduce((sum, item) => sum + item.quantity, 0);
-          
-          if (totalAmount >= mat.amount) {
-            present.push(mat); // 足りてる
-          } else {
-            missing.push(mat); // 足りない
-          }
-        } else {
-          // 同じ単位の在庫がない場合（単位変換はしないので、とりあえず「ある」扱いにする）
-          present.push(mat);
-        }
-      }
-    });
-    return { present, missing };
-  };
-
-  // 在庫が更新されたら、表示中のレシピの不足状況も更新する
-  useEffect(() => {
-    if (selectedRecipe) {
-       const { present, missing } = checkIngredients(selectedRecipe.allMaterials, items);
-       
-       setSelectedRecipe((prev: any) => ({
-         ...prev,
-         ingredients: present,
-         missing: missing
-       }));
-    }
-  }, [items]);
-
-  const generateRecipe = (mode: 'auto' | 'custom') => {
-    setLoading(true);
-    
-    setTimeout(() => {
-      const targetRecipeData = RECIPE_DB[Math.floor(Math.random() * RECIPE_DB.length)];
-      
-      const { present, missing } = checkIngredients(targetRecipeData.materials, items);
-
-      const newRecipe = {
-        id: Date.now().toString(),
-        title: mode === 'auto' ? targetRecipeData.title : `[要望: ${userRequest}] ${targetRecipeData.title}`,
-        time: "20分",
-        ingredients: present,
-        missing: missing,
-        allMaterials: targetRecipeData.materials, // 再計算用に保存
-        desc: mode === 'auto' 
-          ? `${targetRecipeData.title}はいかがですか？ 在庫の${present.map(p => p.name).join('、')}を使えます。`
-          : `ご要望「${userRequest}」に合わせて、${targetRecipeData.title}を提案します。不足している調味料などを買い足せば作れます。`,
-        mode: mode,
-        createdAt: new Date().toLocaleString(),
-        userRequest: mode === 'custom' ? userRequest : undefined
-      };
-
-      onAddHistory(newRecipe);
-      setSelectedRecipe(newRecipe);
-      setLoading(false);
-    }, 1500);
-  };
-
-  const handleAddMissingItems = (recipe: any) => {
-    if (!recipe || !recipe.missing || recipe.missing.length === 0) return;
-    recipe.missing.forEach((item: RecipeMaterial) => {
-      onAddToShoppingList(item.name, item.amount, item.unit); 
-    });
-  };
-
-  if (selectedRecipe) {
-    return (
-      <div className="space-y-4">
-        <button 
-          onClick={() => setSelectedRecipe(null)}
-          className="flex items-center gap-1 text-gray-500 hover:text-gray-800 font-bold mb-2"
-        >
-          <ChevronLeft className="w-5 h-5" /> 戻る
-        </button>
-
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden animate-fade-in-up">
-          <div className="h-32 bg-gray-200 flex items-center justify-center bg-cover bg-center" style={{backgroundImage: 'url("https://images.unsplash.com/photo-1512058564366-18510be2db19?ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=80")'}}>
-            <span className="bg-black/40 text-white px-3 py-1 rounded-full text-sm backdrop-blur-sm">Image Preview</span>
-          </div>
-          <div className="p-6">
-            <div className="flex justify-between items-start mb-2">
-              <h3 className="text-xl font-bold text-gray-800">{selectedRecipe.title}</h3>
-              <span className="text-xs text-gray-400">{selectedRecipe.createdAt}</span>
-            </div>
-            <div className="flex gap-2 text-sm text-gray-500 mb-4">
-              <span>⏱ {selectedRecipe.time}</span>
-              <span>👨‍🍳 {selectedRecipe.mode === 'custom' ? '要望対応' : '簡単'}</span>
-            </div>
-            
-            <div className="mb-4">
-              <h4 className="font-bold text-sm text-gray-700 mb-2">使用する在庫</h4>
-              <div className="flex flex-wrap gap-2">
-                {selectedRecipe.ingredients.length > 0 ? (
-                  selectedRecipe.ingredients.map((i: RecipeMaterial, idx: number) => (
-                    <span key={idx} className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs">
-                      {i.name} {formatAmountStr(i.amount, i.unit)}
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-gray-400 text-xs">なし</span>
-                )}
-              </div>
-            </div>
-
-            {selectedRecipe.missing && selectedRecipe.missing.length > 0 ? (
-              <div className="mb-4">
-                <h4 className="font-bold text-sm text-red-700 mb-2 flex items-center gap-1">
-                  <AlertTriangle className="w-3 h-3" />
-                  不足している材料
-                </h4>
-                <div className="flex flex-wrap gap-2 mb-3">
-                  {selectedRecipe.missing.map((i: RecipeMaterial, idx: number) => (
-                    <span key={idx} className="bg-red-50 text-red-700 border border-red-100 px-2 py-1 rounded text-xs">
-                       {i.name} {formatAmountStr(i.amount, i.unit)}
-                    </span>
-                  ))}
-                </div>
-                <button 
-                  onClick={() => handleAddMissingItems(selectedRecipe)}
-                  className="w-full py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg text-sm font-bold hover:bg-red-100 flex items-center justify-center gap-2 transition-colors"
-                >
-                  <Plus className="w-4 h-4" />
-                  不足している{selectedRecipe.missing.length}点を買い物リストへ
-                </button>
-              </div>
-            ) : (
-               <div className="mb-4 bg-green-50 border border-green-200 p-3 rounded-lg flex items-center gap-2 text-green-700 text-sm font-bold">
-                 <Check className="w-5 h-5" />
-                 すべての材料が揃っています！
-               </div>
-            )}
-
-            <p className="text-gray-600 text-sm leading-relaxed mb-6">
-              {selectedRecipe.desc}
-            </p>
-
-            <button className="w-full py-3 border-2 border-orange-500 text-orange-500 rounded-xl font-bold hover:bg-orange-50">
-              作り方を見る（外部サイト）
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // 生成画面 & 履歴リスト
-  return (
-    <div className="space-y-8">
-      {/* 生成エリア */}
-      <div className="bg-gradient-to-r from-orange-100 to-yellow-100 p-6 rounded-2xl border border-orange-200 text-center">
-        <ChefHat className="w-12 h-12 text-orange-500 mx-auto mb-3" />
-        <h3 className="text-xl font-bold text-gray-800 mb-2">冷蔵庫の中身でシェフに相談</h3>
-        
-        {/* 1. AIに任せて提案ボタン */}
-        <button 
-          onClick={() => generateRecipe('auto')}
-          disabled={loading}
-          className="w-full py-3 bg-white text-orange-600 border-2 border-orange-500 rounded-xl font-bold shadow-sm hover:bg-orange-50 disabled:opacity-50 transition-all flex items-center justify-center gap-2 mb-6"
-        >
-          {loading ? '考案中...' : '🎲 AIに任せてレシピを提案する'}
-        </button>
-
-        {/* 2. 要望入力欄 */}
-        <div className="mb-3 text-left">
-            <label className="block text-sm font-bold text-gray-700 mb-1 flex items-center gap-1">
-                <MessageSquare className="w-4 h-4" />
-                シェフへの要望（任意）
-            </label>
-            <textarea 
-                className="w-full p-3 rounded-xl border border-orange-200 focus:outline-none focus:ring-2 focus:ring-orange-300 text-sm"
-                rows={2}
-                placeholder="例：辛いものが食べたい、10分で作れるもの、子供が喜ぶ味..."
-                value={userRequest}
-                onChange={(e) => setUserRequest(e.target.value)}
-            />
-        </div>
-
-        {/* 3. 要望に合わせて提案ボタン */}
-        <button 
-          onClick={() => generateRecipe('custom')}
-          disabled={loading}
-          className="w-full py-3 bg-orange-500 text-white rounded-xl font-bold shadow-md hover:bg-orange-600 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
-        >
-            {loading ? '考案中...' : '✨ 要望に合わせてAIがレシピを提案する'}
-        </button>
-      </div>
-
-      {/* 履歴リスト */}
-      <div>
-        <h3 className="font-bold text-lg text-gray-800 mb-4 flex items-center gap-2">
-          <History className="w-5 h-5 text-gray-500" />
-          レシピ履歴
-        </h3>
-        {history.length === 0 ? (
-          <div className="text-center py-8 text-gray-400 bg-gray-50 rounded-xl border border-dashed border-gray-200">
-            <Clock className="w-8 h-8 mx-auto mb-2 opacity-30" />
-            <p className="text-sm">まだ履歴はありません</p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {history.map((rec: Recipe) => (
-              <div 
-                key={rec.id}
-                onClick={() => setSelectedRecipe(rec)}
-                className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all cursor-pointer flex justify-between items-center"
-              >
-                <div>
-                  <h4 className="font-bold text-gray-800">{rec.title}</h4>
-                  <div className="flex gap-2 text-xs text-gray-500 mt-1">
-                    <span>{rec.createdAt}</span>
-                    {rec.mode === 'custom' && <span className="text-orange-500">✨ 要望あり</span>}
-                  </div>
-                </div>
-                <ChevronLeft className="w-5 h-5 text-gray-300 transform rotate-180" />
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ... existing ShoppingList, ScannerModal ...
-function ShoppingList({ items, onToggle, onDelete, onAdd, onUpdateQuantity, onExport, unitOptions, addUnitOption }: any) {
-  const [newItemName, setNewItemName] = useState('');
-  const [newItemQuantity, setNewItemQuantity] = useState(1);
-  const [newItemUnit, setNewItemUnit] = useState('個');
-  const [isCustomUnit, setIsCustomUnit] = useState(false);
-  const [customUnitName, setCustomUnitName] = useState('');
-
-  const handleAdd = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (newItemName.trim()) {
-      let finalUnit = newItemUnit;
-      if (isCustomUnit) {
-        finalUnit = customUnitName;
-        addUnitOption(customUnitName);
-      }
-
-      onAdd(newItemName.trim(), newItemQuantity, finalUnit);
-      setNewItemName('');
-      setNewItemQuantity(1);
-      // unitはリセットせずそのまま
-      if (isCustomUnit) {
-        setNewItemUnit(customUnitName); // 新しい単位を選択状態にする
-        setIsCustomUnit(false);
-        setCustomUnitName('');
-      }
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="font-bold text-lg flex items-center gap-2">
-            <ShoppingCart className="w-5 h-5 text-blue-600" />
-            買い物リスト
-          </h3>
-          <button onClick={onExport} className="text-blue-600 text-sm font-bold flex items-center gap-1 hover:bg-blue-50 px-3 py-1.5 rounded-lg transition-colors">
-            <Share2 className="w-4 h-4" /> Keepに送る
-          </button>
-        </div>
-
-        {/* 入力フォーム (拡張) */}
-        <form onSubmit={handleAdd} className="mb-6">
-          <div className="flex gap-2 mb-2">
-            <input 
-              type="text"
-              className="flex-[2] p-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-100"
-              placeholder="商品名..."
-              value={newItemName}
-              onChange={(e) => setNewItemName(e.target.value)}
-            />
-            <div className="flex flex-1 gap-1">
-              <input 
-                type="number"
-                min="1"
-                className="w-16 p-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-100 text-center"
-                value={newItemQuantity}
-                onChange={(e) => setNewItemQuantity(Number(e.target.value))}
-              />
-              {!isCustomUnit ? (
-                <select 
-                  className="flex-1 p-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-100 text-sm"
-                  value={newItemUnit}
-                  onChange={(e) => {
-                    if (e.target.value === 'NEW_ENTRY') {
-                      setIsCustomUnit(true);
-                      setCustomUnitName('');
-                    } else {
-                      setNewItemUnit(e.target.value);
-                    }
-                  }}
-                >
-                  {unitOptions.map((opt: string) => (
-                    <option key={opt} value={opt}>{opt}</option>
-                  ))}
-                  <option value="NEW_ENTRY" className="text-blue-600 font-bold">+ 新規追加</option>
-                </select>
-              ) : (
-                <div className="flex-1 flex gap-1">
-                   <input 
-                    type="text"
-                    className="w-full p-3 bg-white rounded-xl border-2 border-blue-500 focus:outline-none text-sm"
-                    placeholder="単位"
-                    value={customUnitName}
-                    onChange={(e) => setCustomUnitName(e.target.value)}
-                    required
-                    autoFocus
-                  />
-                  <button 
-                    type="button" 
-                    onClick={() => { setIsCustomUnit(false); setNewItemUnit('個'); }}
-                    className="px-2 text-gray-500 bg-gray-100 rounded-lg whitespace-nowrap text-xs"
-                  >
-                    戻る
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-          <button 
-            type="submit"
-            className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold shadow-md hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
-            disabled={!newItemName.trim()}
-          >
-            <Plus className="w-5 h-5" />
-            リストに追加
-          </button>
-        </form>
-
-        <div className="space-y-2">
-          {items.length === 0 ? (
-            <div className="text-center py-8 text-gray-400">
-              <ShoppingCart className="w-12 h-12 mx-auto mb-2 opacity-20" />
-              <p>リストは空です</p>
-            </div>
-          ) : (
-            items.map((item: any) => (
-              <div 
-                key={item.id} 
-                className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${
-                  item.isChecked ? 'bg-gray-50 border-gray-100 opacity-60' : 'bg-white border-gray-200 hover:shadow-sm'
-                }`}
-              >
-                <button 
-                  onClick={() => onToggle(item.id)}
-                  className={`flex-shrink-0 transition-colors ${item.isChecked ? 'text-green-500' : 'text-gray-300 hover:text-green-500'}`}
-                >
-                  {item.isChecked ? <CheckSquare className="w-6 h-6" /> : <Square className="w-6 h-6" />}
-                </button>
-                
-                <div className="flex-1 min-w-0">
-                  <span className={`block font-bold truncate ${item.isChecked ? 'line-through text-gray-400' : 'text-gray-800'}`}>
-                    {item.name}
-                  </span>
-                  <span className="text-xs text-gray-500">
-                    {formatAmountStr(item.quantity, item.unit)}
-                  </span>
-                </div>
-
-                {/* 数量変更ボタン */}
-                <div className="flex items-center gap-1 bg-gray-50 rounded-lg p-1">
-                  <button 
-                    onClick={() => onUpdateQuantity(item.id, -1)}
-                    className="p-1 hover:bg-white rounded shadow-sm text-gray-500 disabled:opacity-30"
-                    disabled={item.quantity <= 1}
-                  >
-                    <Minus className="w-3 h-3" />
-                  </button>
-                  <button 
-                    onClick={() => onUpdateQuantity(item.id, 1)}
-                    className="p-1 hover:bg-white rounded shadow-sm text-gray-500"
-                  >
-                    <Plus className="w-3 h-3" />
-                  </button>
-                </div>
-
-                <button 
-                  onClick={() => onDelete(item.id)}
-                  className="p-2 text-gray-400 hover:bg-red-50 hover:text-red-500 rounded-full transition-colors"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
     </div>
   );
 }
