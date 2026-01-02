@@ -7,7 +7,7 @@ import {
   IceCream, Carrot, Settings, Edit3, ArrowUpDown, X,
   CheckSquare, Square, Minus, MessageSquare,
   History, ChevronLeft, Clock, TrendingDown,
-  AlertOctagon, Ban, Save // AlertOctagonとSaveを追加
+  AlertOctagon, Ban, Save
 } from 'lucide-react';
 
 // --- モックデータと型定義 ---
@@ -405,6 +405,7 @@ export default function App() {
               showToast(`${newItem.name} を追加しました`);
               setActiveTab('inventory');
             }} 
+            onCancel={() => setActiveTab('dashboard')}
           />
         )}
         {activeTab === 'recipes' && (
