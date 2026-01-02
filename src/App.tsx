@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, ChangeEvent } from 'react';
 import { 
   Camera, Search, Plus, Calendar, ChefHat, 
   ShoppingCart, AlertTriangle, Check, Trash2, 
   LayoutDashboard,
-  Refrigerator, Snowflake, Sun, Share2,
+  Refrigerator, Snowflake, Sun,
   IceCream, Carrot, Settings, Edit3, ArrowUpDown, X,
   CheckSquare, Square, Minus, MessageSquare,
   History, ChevronLeft, Clock, TrendingDown,
@@ -206,6 +206,7 @@ export default function App() {
   });
 
   const [inventoryFilterMode, setInventoryFilterMode] = useState<FilterMode>('all');
+
   const [showScannerModal, setShowScannerModal] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
 
@@ -446,7 +447,7 @@ export default function App() {
   );
 }
 
-// ... Subcomponents ...
+// --- Subcomponents ---
 
 function Navigation({ activeTab, setActiveTab, counts }: any) {
   const tabs = [
@@ -1298,6 +1299,15 @@ function AddItemForm({ onAdd, onCancel, categoryOptions, addCategoryOption, expi
                   <span className="font-bold text-sm">{opt.label}</span>
                 </button>
               ))}
+            </div>
+            <div className="mt-4">
+               <button 
+                 type="button" 
+                 onClick={onCancel} // 戻るボタン
+                 className="w-full py-3 text-gray-500 font-bold bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors"
+               >
+                 キャンセル
+               </button>
             </div>
           </div>
         )}
