@@ -7,7 +7,7 @@ import {
   IceCream, Carrot, Settings, Edit3, ArrowUpDown, X,
   CheckSquare, Square, Minus, MessageSquare,
   History, ChevronLeft, Clock, TrendingDown,
-  Ban, Save
+  AlertOctagon, Ban, Save // AlertOctagonとSaveを追加
 } from 'lucide-react';
 
 // --- モックデータと型定義 ---
@@ -307,7 +307,7 @@ export default function App() {
     }));
   };
 
-  // 在庫不足アイテムの計算ロジック
+  // 在庫不足アイテムの計算ロジック (閾値未設定のものは除外)
   const lowStockItems = useMemo(() => {
     const groupedStock: Record<string, number> = {};
     items.forEach(item => {
@@ -405,7 +405,6 @@ export default function App() {
               showToast(`${newItem.name} を追加しました`);
               setActiveTab('inventory');
             }} 
-            onCancel={() => setActiveTab('dashboard')}
           />
         )}
         {activeTab === 'recipes' && (
@@ -460,7 +459,7 @@ export default function App() {
   );
 }
 
-// --- Subcomponents ---
+// ... Subcomponents ...
 
 function Navigation({ activeTab, setActiveTab, counts }: any) {
   const tabs = [
@@ -494,9 +493,11 @@ function Navigation({ activeTab, setActiveTab, counts }: any) {
             >
               <div className="relative">
                 <tab.icon className="w-6 h-6" />
+                {/* 期限切れバッジ */}
                 {tab.id === 'inventory' && counts.expired > 0 && (
                   <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white"></span>
                 )}
+                {/* 在庫不足バッジ (NEW) */}
                 {tab.id === 'inventory' && counts.expired === 0 && counts.lowStock > 0 && (
                   <span className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></span>
                 )}
@@ -524,9 +525,11 @@ function Navigation({ activeTab, setActiveTab, counts }: any) {
               <>
                 <div className="relative">
                   <tab.icon className="w-6 h-6 mb-1" />
-                   {tab.id === 'inventory' && counts.expired > 0 && (
+                   {/* 期限切れバッジ */}
+                  {tab.id === 'inventory' && counts.expired > 0 && (
                     <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full"></span>
                   )}
+                  {/* 在庫不足バッジ */}
                   {tab.id === 'inventory' && counts.expired === 0 && counts.lowStock > 0 && (
                     <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-blue-500 rounded-full"></span>
                   )}
@@ -572,6 +575,7 @@ function Header({ activeTab, setShowScannerModal }: any) {
   );
 }
 
+// Dashboard更新 (各カードクリックでの遷移設定)
 function Dashboard({ items, counts, setActiveTab, setInventoryFilterMode }: any) {
   const dates = Array.from({ length: 14 }, (_, i) => {
     const d = new Date();
@@ -707,7 +711,9 @@ function Dashboard({ items, counts, setActiveTab, setInventoryFilterMode }: any)
   );
 }
 
+// ItemCard更新 (thresholdプロパティ追加, 色ロジック変更)
 const ItemCard = ({ item, deleteItem, onAddToShoppingList, isLowStock, threshold }: { item: FoodItem, deleteItem: (id: string) => void, onAddToShoppingList: (name: string, quantity?: number, unit?: string) => void, isLowStock?: boolean, threshold?: number }) => {
+  // 色判定ロジック
   const getStatusColor = (dateStr: string, lowStock?: boolean, quantity?: number) => {
     const today = new Date().toISOString().split('T')[0];
     const threeDays = new Date(Date.now() + 86400000 * 3).toISOString().split('T')[0];
@@ -741,6 +747,7 @@ const ItemCard = ({ item, deleteItem, onAddToShoppingList, isLowStock, threshold
         <div>
           <h4 className="font-bold text-lg leading-tight flex items-center gap-2">
             {item.name}
+            {/* 在庫切れバッジ (NEW) */}
             {item.quantity === 0 ? (
               <span className="text-[10px] bg-gray-600 text-white px-1.5 py-0.5 rounded flex items-center gap-0.5 whitespace-nowrap">
                 <Ban className="w-3 h-3" />
@@ -754,6 +761,7 @@ const ItemCard = ({ item, deleteItem, onAddToShoppingList, isLowStock, threshold
             )}
           </h4>
           <div className="flex gap-2 text-xs opacity-80 mt-1 flex-wrap">
+            {/* 在庫切れ時は場所を表示しないか「-」にする */}
             <span className="bg-white/50 px-1.5 py-0.5 rounded border border-black/10">
               {item.quantity === 0 ? '-' : item.location}
             </span>
@@ -765,6 +773,7 @@ const ItemCard = ({ item, deleteItem, onAddToShoppingList, isLowStock, threshold
         </div>
       </div>
       <div className="text-right flex flex-col justify-between h-full">
+        {/* 在庫切れでない場合のみ期限を表示 */}
         {item.quantity > 0 && item.expiryDate && (
           <>
             <div className="text-sm font-bold">{item.expiryDate.slice(5).replace('-','/')}まで</div>
@@ -780,6 +789,7 @@ const ItemCard = ({ item, deleteItem, onAddToShoppingList, isLowStock, threshold
           >
             <ShoppingCart className="w-4 h-4" />
           </button>
+          {/* 在庫切れ（仮アイテム）の場合は削除ボタンを表示しない */}
           {item.id !== 'temp' && !item.id.startsWith('temp') && (
             <button 
               onClick={(e) => { e.stopPropagation(); deleteItem(item.id); }}
@@ -795,6 +805,7 @@ const ItemCard = ({ item, deleteItem, onAddToShoppingList, isLowStock, threshold
   );
 }
 
+// InventoryList更新 (フィルタ機能強化 & ダミーデータ生成ロジック変更)
 function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, stockThresholds, inventoryFilterMode, setInventoryFilterMode }: any) {
   const [filter, setFilter] = useState<StorageType | 'all'>('all');
   const [sortBy, setSortBy] = useState<'expiry' | 'added' | 'name'>('expiry');
@@ -804,12 +815,19 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
   const displayItems = useMemo(() => {
     let baseItems = [...items];
 
+    // 在庫少モードの場合、リストにない（在庫0）アイテムも生成して追加する
     if (inventoryFilterMode === 'lowStock') {
+       // 現在のアイテムリストにある名前セット
        const existingNames = new Set(items.map((i: any) => i.categorySmall || i.name));
+       
+       // lowStockItems (名前リスト) の中で、itemsに含まれていないものを探す
        const missingNames = lowStockItems.filter((name: string) => !existingNames.has(name));
        
+       // 不足アイテムのダミーデータを生成
        const missingFoodItems: FoodItem[] = missingNames.map((name: string) => {
+         // 推測ロジックを再利用して絵文字などを埋める
          let determinedEmoji = '📦';
+         // デフォルトカテゴリーは 'other' にしておく
          let determinedCategory: ItemCategory = 'other';
          
          for (const [key, emoji] of Object.entries(EMOJI_KEYWORDS)) {
@@ -822,13 +840,13 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
          return {
            id: `temp-${name}`, 
            name: name,
-           storage: 'ambient', 
+           storage: 'ambient', // 仮
            category: determinedCategory,
            categorySmall: name,
-           location: '', 
-           expiryDate: '', 
+           location: '', // 空文字に設定
+           expiryDate: '', // 期限なし
            quantity: 0,
-           unit: '個', 
+           unit: '個', // 仮
            addedDate: '',
            emoji: determinedEmoji
          };
@@ -841,7 +859,9 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
   }, [items, inventoryFilterMode, lowStockItems]);
 
 
+  // 1. フィルタリング (モードによる絞り込み)
   const filteredItems = displayItems.filter((item: any) => {
+    // モード別フィルタ
     if (inventoryFilterMode === 'lowStock') {
        const key = item.categorySmall || item.name;
        return lowStockItems.includes(key);
@@ -858,12 +878,15 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
       return item.expiryDate >= today && item.expiryDate <= threeDaysLater && item.quantity > 0;
     }
 
+    // 通常モード (all)
     return filter === 'all' ? true : item.storage === filter;
   });
 
+  // 2. ソート関数
   const getSortedItems = (itemsToSort: FoodItem[]) => {
     const sorted = [...itemsToSort];
     if (sortBy === 'expiry') {
+      // 期限がない（在庫0）アイテムは後ろへ
       sorted.sort((a, b) => {
         if (!a.expiryDate) return 1;
         if (!b.expiryDate) return -1;
@@ -886,6 +909,7 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
     { id: 'ambient', label: '常温', icon: Sun },
   ];
 
+  // モード切り替えタブ
   const modeTabs: { id: FilterMode, label: string, icon: any, color: string }[] = [
     { id: 'all', label: 'すべて', icon: LayoutDashboard, color: 'bg-gray-100 text-gray-600' },
     { id: 'expired', label: '期限切れ', icon: AlertTriangle, color: 'bg-red-100 text-red-600' },
@@ -895,6 +919,8 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
 
   return (
     <div className="space-y-4">
+      
+      {/* 表示モード切り替えタブ (NEW) */}
       <div className="grid grid-cols-4 gap-2 bg-white p-2 rounded-xl shadow-sm border border-gray-100">
         {modeTabs.map((tab) => (
           <button
@@ -912,6 +938,7 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
         ))}
       </div>
 
+      {/* フィルタ & ソート UI (通常モード時のみ場所フィルタを表示) */}
       <div className="flex flex-col gap-3">
         {inventoryFilterMode === 'all' && (
           <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
@@ -932,7 +959,9 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
           </div>
         )}
 
+        {/* ソート & グルーピング設定 */}
         <div className="flex flex-wrap justify-between items-center gap-3 bg-gray-50 p-3 rounded-xl border border-gray-100">
+           {/* カテゴリーまとめトグル */}
            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none hover:opacity-80 transition-opacity">
             <div className={`relative w-10 h-6 rounded-full transition-colors duration-200 ease-in-out ${isGrouped ? 'bg-green-500' : 'bg-gray-300'}`}>
               <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transform transition-transform duration-200 ease-in-out ${isGrouped ? 'translate-x-4' : 'translate-x-0'}`} />
@@ -946,6 +975,7 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
             <span className="font-bold text-xs sm:text-sm">カテゴリー</span>
           </label>
 
+          {/* ソート選択 */}
           <div className="flex items-center gap-2 ml-auto">
             <ArrowUpDown className="w-4 h-4 text-gray-500" />
             <select 
@@ -961,12 +991,15 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
         </div>
       </div>
 
+      {/* リスト表示 */}
       <div className="space-y-6">
         {filteredItems.length === 0 ? (
           <div className="text-center py-12 text-gray-400">
              <p>該当する食品はありません</p>
           </div>
         ) : isGrouped ? (
+          // カテゴリーごとのグループ表示
+          // otherは最後に表示 (キー重複修正: filterでotherを除外し、末尾に手動追加)
           [...Object.keys(CATEGORY_LABELS).filter(k => k !== 'other'), 'other'].map((catKey) => {
             const categoryItems = filteredItems.filter((item: FoodItem) => (item.category || 'other') === catKey);
             const sortedGroupItems = getSortedItems(categoryItems);
@@ -994,6 +1027,7 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
             );
           })
         ) : (
+          // フラット表示 (全体ソート)
           <div className="grid gap-0 animate-fade-in-up">
             {getSortedItems(filteredItems).map((item: FoodItem) => (
               <ItemCard 
@@ -1012,9 +1046,10 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
   );
 }
 
+// ... existing SettingsScreen, EmojiPicker, AddItemForm, RecipeGenerator, ShoppingList, ScannerModal ...
 function SettingsScreen({ categoryOptions, expirySettings, setExpirySettings, stockThresholds, setStockThresholds, showToast }: any) {
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<'expiry' | 'stock'>('expiry');
+  const [activeTab, setActiveTab] = useState<'expiry' | 'stock'>('expiry'); // 設定タブ切り替え
 
   const handleExpiryChange = (item: string, days: number) => {
     setExpirySettings((prev: any) => ({
@@ -1030,6 +1065,7 @@ function SettingsScreen({ categoryOptions, expirySettings, setExpirySettings, st
     }));
   };
 
+  // フィルタリングロジック
   const filteredCategoryOptions = useMemo(() => {
     if (!searchTerm) return categoryOptions;
 
@@ -1049,11 +1085,13 @@ function SettingsScreen({ categoryOptions, expirySettings, setExpirySettings, st
   return (
     <div className="space-y-6">
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+        
         <h3 className="font-bold text-xl mb-4 flex items-center gap-2">
           <Settings className="w-6 h-6 text-gray-600" />
           アプリ設定
         </h3>
 
+        {/* 設定タブ */}
         <div className="flex bg-gray-100 p-1 rounded-xl mb-6">
           <button 
             onClick={() => setActiveTab('expiry')}
@@ -1082,6 +1120,7 @@ function SettingsScreen({ categoryOptions, expirySettings, setExpirySettings, st
           }
         </p>
 
+        {/* 検索ボックス */}
         <div className="mb-6 relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
           <input 
