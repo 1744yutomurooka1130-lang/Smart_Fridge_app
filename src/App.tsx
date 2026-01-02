@@ -1578,9 +1578,19 @@ function AddItemForm({ onAdd, onCancel, categoryOptions, addCategoryOption, expi
               <p className="text-xs text-green-600 mt-1">✨ 設定された日数（{expirySettings[data.categorySmall] || '?'}日）から自動計算</p>
             </div>
 
+            {/* キャンセルボタンを追加し、onCancelを呼び出す */}
             <div className="flex gap-3 pt-4">
-              <button type="button" onClick={() => setStep(2)} className="flex-1 py-3 text-gray-500 font-bold">戻る</button>
-              <button type="submit" className="flex-1 py-3 bg-green-500 text-white rounded-xl font-bold shadow-md hover:bg-green-600">
+              <button 
+                type="button" 
+                onClick={onCancel} 
+                className="flex-1 py-3 text-gray-500 font-bold bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors"
+              >
+                戻る
+              </button>
+              <button 
+                type="submit" 
+                className="flex-1 py-3 bg-green-500 text-white rounded-xl font-bold shadow-md hover:bg-green-600 transition-colors"
+              >
                 登録する
               </button>
             </div>
