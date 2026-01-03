@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo, ChangeEvent } from 'react';
-import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Check, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles, Scan } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Check, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles } from 'lucide-react';
 
 // --- 型定義 ---
 type StorageType = 'refrigerator' | 'freezer_main' | 'freezer_sub' | 'vegetable' | 'ambient';
@@ -11,22 +11,15 @@ interface RecipeMaterial { name: string; amount: number | string; unit: string; 
 interface Recipe { id: string; title: string; time: string; ingredients: RecipeMaterial[]; missing: RecipeMaterial[]; desc: string; mode: 'auto' | 'custom'; createdAt: string; userRequest?: string; allMaterials: RecipeMaterial[]; }
 
 // --- 定数 ---
-const GEMINI_MODEL = "gemini-3-flash-preview"; // 最新モデル指定
+const GEMINI_MODEL = "gemini-3-flash-preview"; 
 
 // --- ヘルパー関数 ---
 const formatAmountStr = (amount: number | string, unit: string) => { const nonNumericUnits = ['少々', '適量', 'お好みで', 'ひとつまみ', '適宜']; return nonNumericUnits.includes(unit) ? unit : `${amount}${unit}`; };
-
-// 画像をBase64に変換するヘルパー
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
-    reader.onload = () => {
-      const result = reader.result as string;
-      // Data URLスキーム部分を除去して純粋なBase64データを返す
-      const base64Data = result.split(',')[1]; 
-      resolve(base64Data);
-    };
+    reader.onload = () => { const result = reader.result as string; resolve(result.split(',')[1]); };
     reader.onerror = error => reject(error);
   });
 };
@@ -54,7 +47,7 @@ const INITIAL_LOCATION_OPTIONS: Record<StorageType, string[]> = { refrigerator: 
 const DEFAULT_EXPIRY_DAYS: Record<string, number> = { '牛乳': 7, '卵': 14, '納豆': 10, 'ヨーグルト': 14, '豚肉': 3, '牛肉': 3, '鶏肉': 2, 'ハム': 10, 'キャベツ': 7, 'レタス': 4, 'トマト': 5, '冷凍うどん': 30, 'アイス': 90, '玉ねぎ': 30, 'りんご': 14, 'バナナ': 4, 'みかん': 7 };
 const DEFAULT_STOCK_THRESHOLDS: Record<string, number> = { '卵': 3, '牛乳': 1, '納豆': 1, '玉ねぎ': 1, '人参': 1 };
 
-// --- アプリケーション本体 ---
+// --- コンポーネント実装 ---
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'inventory' | 'add' | 'recipes' | 'shopping' | 'settings'>('dashboard');
@@ -190,7 +183,23 @@ export default function App() {
         {activeTab === 'shopping' && <ShoppingList items={shoppingList} onToggle={toggleShoppingItem} onDelete={deleteShoppingItem} onAdd={addToShoppingList} onUpdateQuantity={updateShoppingItemQuantity} onExport={exportToKeep} unitOptions={unitOptions} addUnitOption={addUnitOption} />}
         {activeTab === 'settings' && <SettingsScreen categoryOptions={categoryOptions} expirySettings={expirySettings} setExpirySettings={setExpirySettings} stockThresholds={stockThresholds} setStockThresholds={setStockThresholds} showToast={showToast} apiKey={geminiApiKey} saveApiKey={saveApiKey} />}
       </main>
-      {showScannerModal && <ScannerModal onClose={() => setShowScannerModal(false)} onScan={(scannedItems: FoodItem[]) => { setItems([...items, ...scannedItems]); setShowScannerModal(false); showToast(`${scannedItems.length}件のアイテムを解析しました`); }} apiKey={geminiApiKey} />}
+      {showScannerModal && (
+        <ScannerModal 
+          onClose={() => setShowScannerModal(false)} 
+          onScan={(scannedItems: FoodItem[]) => { 
+            setItems([...items, ...scannedItems]); 
+            setShowScannerModal(false); 
+            showToast(`${scannedItems.length}件のアイテムを解析しました`); 
+          }} 
+          apiKey={geminiApiKey}
+          categoryOptions={categoryOptions}
+          addCategoryOption={addCategoryOption}
+          locationOptions={locationOptions}
+          addLocationOption={addLocationOption}
+          emojiHistory={emojiHistory}
+          expirySettings={expirySettings}
+        />
+      )}
     </div>
   );
 }
@@ -388,7 +397,7 @@ function SettingsScreen({ categoryOptions, expirySettings, setExpirySettings, st
         {activeTab === 'api' ? (
           <div>
             <h4 className="font-bold text-gray-800 mb-2">Google Gemini APIキー</h4>
-            <p className="text-xs text-gray-500 mb-4">AIレシピ提案やレシート解析機能を使用するには、Google AI Studioで取得したAPIキーが必要です。<br/>キーはブラウザ内にのみ保存されます。</p>
+            <p className="text-xs text-gray-500 mb-4">AI機能（レシピ・OCR）を使用するには、Google AI Studioで取得したAPIキーが必要です。<br/>キーはブラウザ内にのみ保存されます。</p>
             <div className="flex gap-2">
               <input type="password" className="flex-1 p-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-200" placeholder="APIキーを入力..." value={inputApiKey} onChange={(e) => setInputApiKey(e.target.value)} />
               <button onClick={() => saveApiKey(inputApiKey)} className="px-4 bg-purple-600 text-white rounded-xl font-bold hover:bg-purple-700 transition-colors">保存</button>
@@ -573,7 +582,7 @@ function RecipeGenerator({ items, onAddToShoppingList, history, onAddHistory, ap
     if (mode === 'custom' && userRequest) { prompt += `\n【ユーザーからの要望】\n${userRequest}\nこの要望を最大限反映してください。`; }
 
     try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`, {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
       });
@@ -672,60 +681,110 @@ function ShoppingList({ items, onToggle, onDelete, onAdd, onUpdateQuantity, onEx
   );
 }
 
-function ScannerModal({ onClose, onScan, categoryOptions, addCategoryOption, locationOptions, addLocationOption, emojiHistory, expirySettings, apiKey }: any) {
+function ScannerModal({ onClose, onScan, apiKey, categoryOptions, addCategoryOption, locationOptions, addLocationOption, emojiHistory, expirySettings }: any) {
   const [scanning, setScanning] = useState(false);
-  const [ocrText, setOcrText] = useState('');
-  const [ocrProgress, setOcrProgress] = useState(0);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   const handleReceiptCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const imageFile = e.target.files[0];
       setCapturedImage(URL.createObjectURL(imageFile));
-      setScanning(true);
-      setOcrProgress(0);
-      try {
-        const result = await Tesseract.recognize(imageFile, 'jpn', { logger: m => { if (m.status === 'recognizing text') setOcrProgress(Math.floor(m.progress * 100)); } });
-        setOcrText(result.data.text);
-      } catch (err: any) { console.error(err); setOcrText('読み取りに失敗しました。'); } finally { setScanning(false); }
-    }
-  };
+      setLoading(true);
 
-  const handleOcrComplete = () => {
-    const lines = ocrText.split('\n').filter(line => line.trim() !== '');
-    const EMOJI_KEYWORDS: Record<string, string> = { '牛': '🥩', '豚': '🥩', '鶏': '🍗', '肉': '🥩', 'ハム': '🥩', '魚': '🐟', '鮭': '🐟', '鯖': '🐟', '鯵': '🐟', '鰯': '🐟', '鮪': '🐟', '刺身': '🐟', 'エビ': '🦐', 'カニ': '🦀', '牛乳': '🥛', 'ヨーグルト': '🥣', 'チーズ': '🧀', '卵': '🥚', 'キャベツ': '🥬', 'レタス': '🥬', '白菜': '🥬', 'トマト': '🍅', 'きゅうり': '🥒', 'ブロッコリー': '🥦', '人参': '🥕', '大根': '🥢', '玉ねぎ': '🧅', 'きのこ': '🍄', 'りんご': '🍎', 'みかん': '🍊', 'バナナ': '🍌', 'パン': '🍞', 'うどん': '🍜', 'カレー': '🍛', 'アイス': '🍨', 'チョコ': '🍫', '酒': '🍶', 'ビール': '🍺', 'ジュース': '🧃', '豆腐': '🧊', '納豆': '🥢' };
-    
-    const scannedItems: FoodItem[] = lines.slice(0, Math.min(lines.length, 5)).map((line, index) => {
-      let emoji = '📦';
-      for (const [key, val] of Object.entries(EMOJI_KEYWORDS)) { if (line.includes(key)) { emoji = val; break; } }
-      
-      let expiryDate = '';
-      if (expirySettings && expirySettings[line]) { 
-        const d = new Date(); d.setDate(d.getDate() + expirySettings[line]); expiryDate = d.toISOString().split('T')[0]; 
+      if (!apiKey) {
+        alert("APIキーが設定されていません。設定画面でキーを入力してください。");
+        setLoading(false);
+        return;
       }
-      
-      return { id: Date.now().toString() + index, name: line.substring(0, 15), storage: 'refrigerator', category: 'other', categorySmall: line.substring(0, 15), location: '未設定', expiryDate: expiryDate, quantity: 1, unit: '個', addedDate: new Date().toISOString().split('T')[0], emoji: emoji };
-    });
 
-    // 設定データを活用するロジック (未使用変数エラー回避)
-    scannedItems.forEach(item => {
-       const catOpts = categoryOptions[item.category] || [];
-       if (!catOpts.includes(item.categorySmall)) addCategoryOption(item.category, item.categorySmall);
-       
-       const locOpts = locationOptions[item.storage] || [];
-       if (!locOpts.includes(item.location)) addLocationOption(item.storage, item.location);
+      try {
+        const base64Image = await fileToBase64(imageFile);
+        
+        const prompt = `
+          このレシート画像を解析し、購入された食品アイテムのリストを作成してください。
+          以下のJSON形式のみを出力してください。余計な説明は不要です。
+          賞味期限は、もしレシートに日付があればそこから適切に推測するか、食品の一般的な日持ちを考慮して今日からの日付（YYYY-MM-DD）を設定してください。
+          
+          {
+            "items": [
+              {
+                "name": "食品名",
+                "quantity": 数値（個数など）,
+                "unit": "単位（個、本、パックなど）",
+                "expiryDate": "YYYY-MM-DD",
+                "category": "dairy" | "egg" | "vegetable" | "fruit" | "meat" | "fish" | "other",
+                "emoji": "絵文字"
+              }
+            ]
+          }
+        `;
 
-       if (emojiHistory[item.categorySmall]) item.emoji = emojiHistory[item.categorySmall];
-    });
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                { text: prompt },
+                { inline_data: { mime_type: imageFile.type, data: base64Image } }
+              ]
+            }]
+          })
+        });
 
-    onScan(scannedItems);
+        const data = await response.json();
+        const text = data.candidates[0].content.parts[0].text;
+        const jsonStr = text.match(/\{[\s\S]*\}/)[0];
+        const result = JSON.parse(jsonStr);
+
+        const scannedItems = result.items.map((item: any, index: number) => ({
+          id: Date.now().toString() + index,
+          name: item.name,
+          storage: 'refrigerator', // デフォルト
+          category: item.category || 'other',
+          categorySmall: item.name,
+          location: '未設定',
+          expiryDate: item.expiryDate || '',
+          quantity: item.quantity || 1,
+          unit: item.unit || '個',
+          addedDate: new Date().toISOString().split('T')[0],
+          emoji: item.emoji || '📦'
+        }));
+
+        // 学習データの更新（未使用変数エラー回避のため実行）
+        scannedItems.forEach((item: FoodItem) => {
+             const catOpts = categoryOptions[item.category] || [];
+             if (!catOpts.includes(item.categorySmall)) addCategoryOption(item.category, item.categorySmall);
+             
+             const locOpts = locationOptions[item.storage] || [];
+             if (!locOpts.includes(item.location)) addLocationOption(item.storage, item.location);
+
+             if (emojiHistory[item.categorySmall]) item.emoji = emojiHistory[item.categorySmall];
+             
+             // expirySettingsも参照して更新（もしあれば）
+             if (expirySettings[item.categorySmall] && !item.expiryDate) {
+                 const d = new Date(); d.setDate(d.getDate() + expirySettings[item.categorySmall]);
+                 item.expiryDate = d.toISOString().split('T')[0];
+             }
+        });
+
+        onScan(scannedItems);
+
+      } catch (error) {
+        console.error("Gemini OCR Error:", error);
+        alert("画像の解析に失敗しました。");
+      } finally {
+        setLoading(false);
+      }
+    }
   };
 
   return (
     <div className="fixed inset-0 bg-black/80 z-50 flex flex-col items-center justify-center p-4">
       <div className="bg-white w-full max-w-md rounded-3xl overflow-hidden relative flex flex-col max-h-[90vh]">
         <div className="flex border-b border-gray-100">
-            <div className={`flex-1 py-4 font-bold text-sm flex items-center justify-center gap-2 text-blue-600 border-b-2 border-blue-600`}><FileText className="w-5 h-5" /> レシートOCR</div>
+            <div className={`flex-1 py-4 font-bold text-sm flex items-center justify-center gap-2 text-blue-600 border-b-2 border-blue-600`}><FileText className="w-5 h-5" /> レシートOCR (Gemini AI)</div>
         </div>
         <div className="flex-1 bg-gray-50 relative overflow-y-auto min-h-[300px] flex flex-col items-center justify-center p-4">
           <div className="w-full flex flex-col items-center">
@@ -735,10 +794,9 @@ function ScannerModal({ onClose, onScan, categoryOptions, addCategoryOption, loc
                       <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleReceiptCapture} />
                   </label>
               ) : (
-                  <div className="w-full mb-4 relative"><img src={capturedImage} alt="Receipt" className="w-full h-48 object-contain bg-black rounded-lg" />{scanning && (<div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center text-white rounded-lg"><Loader2 className="w-8 h-8 animate-spin mb-2" /><span className="text-xs font-bold">解析中... {ocrProgress}%</span></div>)}</div>
+                  <div className="w-full mb-4 relative"><img src={capturedImage} alt="Receipt" className="w-full h-48 object-contain bg-black rounded-lg" />{loading && (<div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center text-white rounded-lg"><Loader2 className="w-8 h-8 animate-spin mb-2" /><span className="text-xs font-bold">AI解析中...</span></div>)}</div>
               )}
-              {ocrText && (<div className="w-full bg-white p-3 rounded-lg border border-gray-200 mb-4 max-h-32 overflow-y-auto"><p className="text-xs text-gray-600 whitespace-pre-wrap">{ocrText}</p></div>)}
-              <button onClick={handleOcrComplete} disabled={scanning || !ocrText} className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg disabled:opacity-50">解析結果を追加</button>
+              {loading && <p className="text-xs text-gray-500 animate-pulse">Gemini AIが画像を読み取っています...</p>}
           </div>
         </div>
         <div className="p-4 border-t border-gray-100 bg-white"><button onClick={onClose} className="w-full py-3 text-gray-500 font-bold bg-gray-100 rounded-xl">キャンセル</button></div>
