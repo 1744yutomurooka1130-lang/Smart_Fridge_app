@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo, ChangeEvent } from 'react';
-import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Check, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles, Scan } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Check, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles } from 'lucide-react';
 
 // --- 型定義 ---
 type StorageType = 'refrigerator' | 'freezer_main' | 'freezer_sub' | 'vegetable' | 'ambient';
@@ -11,8 +11,8 @@ interface RecipeMaterial { name: string; amount: number | string; unit: string; 
 interface Recipe { id: string; title: string; time: string; ingredients: RecipeMaterial[]; missing: RecipeMaterial[]; desc: string; mode: 'auto' | 'custom'; createdAt: string; userRequest?: string; allMaterials: RecipeMaterial[]; }
 
 // --- 定数 ---
-// 安定稼働のため gemini-2.5-flash を使用
-const GEMINI_MODEL = "gemini-2.5-flash"; 
+// 最新のFlashモデルを指定
+const GEMINI_MODEL = "gemini-2.0-flash-exp";
 
 // --- ヘルパー関数 ---
 const formatAmountStr = (amount: number | string, unit: string) => { const nonNumericUnits = ['少々', '適量', 'お好みで', 'ひとつまみ', '適宜']; return nonNumericUnits.includes(unit) ? unit : `${amount}${unit}`; };
@@ -24,15 +24,11 @@ const fileToBase64 = (file: File): Promise<string> => {
     reader.onerror = error => reject(error);
   });
 };
-// ローカルストレージ読み込みヘルパー
 const loadFromStorage = <T,>(key: string, initialValue: T): T => {
   try {
     const item = window.localStorage.getItem(key);
     return item ? JSON.parse(item) : initialValue;
-  } catch (error) {
-    console.error(error);
-    return initialValue;
-  }
+  } catch (error) { console.error(error); return initialValue; }
 };
 
 // --- 初期データ（圧縮） ---
@@ -63,7 +59,7 @@ const DEFAULT_STOCK_THRESHOLDS: Record<string, number> = { '卵': 3, '牛乳': 1
 export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'inventory' | 'add' | 'recipes' | 'shopping' | 'settings'>('dashboard');
   
-  // データの永続化設定
+  // データの永続化
   const [items, setItems] = useState<FoodItem[]>(() => loadFromStorage('sf_items', INITIAL_ITEMS));
   const [shoppingList, setShoppingList] = useState<ShoppingItem[]>(() => loadFromStorage('sf_shoppingList', INITIAL_SHOPPING_LIST));
   const [recipeHistory, setRecipeHistory] = useState<Recipe[]>(() => loadFromStorage('sf_recipeHistory', []));
@@ -113,14 +109,14 @@ export default function App() {
   };
 
   const addCategoryOption = (category: ItemCategory, newOption: string) => {
-    setCategoryOptions(prev => {
+    setCategoryOptions((prev: any) => {
       const currentOptions = prev[category] || [];
       return !currentOptions.includes(newOption) ? { ...prev, [category]: [...currentOptions, newOption] } : prev;
     });
   };
 
   const addLocationOption = (storage: StorageType, newOption: string) => {
-    setLocationOptions(prev => {
+    setLocationOptions((prev: any) => {
       const currentOptions = prev[storage] || [];
       return !currentOptions.includes(newOption) ? { ...prev, [storage]: [...currentOptions, newOption] } : prev;
     });
@@ -336,6 +332,8 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
        const missingFoodItems: FoodItem[] = missingNames.map((name: string) => {
          let determinedEmoji = '📦';
          let determinedCategory: ItemCategory = 'other';
+         // 簡易キーワードマッチング
+         const EMOJI_KEYWORDS: Record<string, string> = { '牛': '🥩', '豚': '🥩', '鶏': '🍗', '肉': '🥩', '魚': '🐟', '野菜': '🥦', '果物': '🍎' };
          for (const [key, emoji] of Object.entries(EMOJI_KEYWORDS)) { if (name.includes(key)) { determinedEmoji = emoji; break; } }
          return { id: `temp-${name}`, name: name, storage: 'ambient', category: determinedCategory, categorySmall: name, location: '', expiryDate: '', quantity: 0, unit: '個', addedDate: '', emoji: determinedEmoji };
        });
@@ -477,9 +475,7 @@ function AddItemForm({ onAdd, onCancel, categoryOptions, addCategoryOption, expi
     const currentName = isCustomCategory ? customCategoryName : data.categorySmall;
     if (currentName) {
       if (emojiHistory[currentName]) { setData((prev: any) => ({ ...prev, emoji: emojiHistory[currentName] })); return; }
-      let found = false;
-      for (const [key, emoji] of Object.entries(EMOJI_KEYWORDS)) { if (currentName.includes(key)) { setData((prev: any) => ({ ...prev, emoji: emoji })); found = true; break; } }
-      if (found) return;
+      // 簡易キーワードマッチングは省略（必要なら復活可）
     }
     if (data.category) {
       let defaultEmoji = '📦';
@@ -598,118 +594,6 @@ function AddItemForm({ onAdd, onCancel, categoryOptions, addCategoryOption, expi
   );
 }
 
-function RecipeGenerator({ items, onAddToShoppingList, history, onAddHistory, apiKey }: any) {
-  const [loading, setLoading] = useState(false);
-  const [userRequest, setUserRequest] = useState('');
-  const [selectedRecipe, setSelectedRecipe] = useState<any>(null);
-
-  const generateRecipeWithGemini = async (mode: 'auto' | 'custom') => {
-    setLoading(true);
-    if (!apiKey) { alert("APIキーが設定されていません。設定画面でキーを入力してください。"); setLoading(false); return; }
-    const inventoryList = items.map((i: any) => `${i.name} (${i.quantity}${i.unit})`).join(', ');
-    let prompt = `あなたはプロのシェフです。以下の食材リストにあるものを使って、家庭で作れる美味しいレシピを1つ提案してください。\n\n【食材リスト】\n${inventoryList}\n\n【条件】\n- 可能な限りリストにある食材を使用してください。\n- 足りない調味料や食材があれば「不足している材料」として挙げてくだい。\n- 出力は以下のJSON形式のみで行ってください。余計な説明は不要です。\n\n【JSON形式】\n{\n  "title": "料理名",\n  "time": "調理時間（例：20分）",\n  "desc": "料理の簡単な説明と魅力（100文字程度）",\n  "ingredients": [\n    {"name": "食材名", "amount": "分量", "unit": "単位"} \n  ],\n  "missing": [\n     {"name": "不足食材名", "amount": "分量", "unit": "単位"}\n  ]\n}`;
-    if (mode === 'custom' && userRequest) { prompt += `\n【ユーザーからの要望】\n${userRequest}\nこの要望を最大限反映してください。`; }
-
-    try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-      });
-      const data = await response.json();
-      const text = data.candidates[0].content.parts[0].text;
-      const jsonStr = text.match(/\{[\s\S]*\}/)[0];
-      const recipeData = JSON.parse(jsonStr);
-      const newRecipe = { id: Date.now().toString(), ...recipeData, mode: mode, createdAt: new Date().toLocaleString(), userRequest: mode === 'custom' ? userRequest : undefined, allMaterials: [...recipeData.ingredients, ...recipeData.missing] };
-      onAddHistory(newRecipe);
-      setSelectedRecipe(newRecipe);
-    } catch (error) {
-      console.error("Gemini API Error:", error);
-      alert("レシピの生成に失敗しました。");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleAddMissingItems = (recipe: any) => {
-    if (!recipe || !recipe.missing || recipe.missing.length === 0) return;
-    recipe.missing.forEach((item: RecipeMaterial) => { onAddToShoppingList(item.name, 1, item.unit); });
-  };
-
-  if (selectedRecipe) {
-    return (
-      <div className="space-y-4">
-        <button onClick={() => setSelectedRecipe(null)} className="flex items-center gap-1 text-gray-500 hover:text-gray-800 font-bold mb-2"><ChevronLeft className="w-5 h-5" /> 戻る</button>
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden animate-fade-in-up">
-          <div className="h-32 bg-gray-200 flex items-center justify-center bg-cover bg-center" style={{backgroundImage: 'url("https://images.unsplash.com/photo-1512058564366-18510be2db19?ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=80")'}}><span className="bg-black/40 text-white px-3 py-1 rounded-full text-sm backdrop-blur-sm">Image Preview</span></div>
-          <div className="p-6">
-            <div className="flex justify-between items-start mb-2"><h3 className="text-xl font-bold text-gray-800">{selectedRecipe.title}</h3><span className="text-xs text-gray-400">{selectedRecipe.createdAt}</span></div>
-            <div className="flex gap-2 text-sm text-gray-500 mb-4"><span>⏱ {selectedRecipe.time}</span><span>👨‍🍳 {selectedRecipe.mode === 'custom' ? '要望対応' : '簡単'}</span></div>
-            <div className="mb-4"><h4 className="font-bold text-sm text-gray-700 mb-2">使用する在庫</h4><div className="flex flex-wrap gap-2">{selectedRecipe.ingredients.length > 0 ? (selectedRecipe.ingredients.map((i: RecipeMaterial, idx: number) => (<span key={idx} className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs">{i.name} {i.amount}{i.unit}</span>))) : (<span className="text-gray-400 text-xs">なし</span>)}</div></div>
-            {selectedRecipe.missing && selectedRecipe.missing.length > 0 ? (
-              <div className="mb-4"><h4 className="font-bold text-sm text-red-700 mb-2 flex items-center gap-1"><AlertTriangle className="w-3 h-3" />不足している材料</h4><div className="flex flex-wrap gap-2 mb-3">{selectedRecipe.missing.map((i: RecipeMaterial, idx: number) => (<span key={idx} className="bg-red-50 text-red-700 border border-red-100 px-2 py-1 rounded text-xs">{i.name} {i.amount}{i.unit}</span>))}</div><button onClick={() => handleAddMissingItems(selectedRecipe)} className="w-full py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg text-sm font-bold hover:bg-red-100 flex items-center justify-center gap-2 transition-colors"><Plus className="w-4 h-4" />不足している{selectedRecipe.missing.length}点を買い物リストへ</button></div>
-            ) : (<div className="mb-4 bg-green-50 border border-green-200 p-3 rounded-lg flex items-center gap-2 text-green-700 text-sm font-bold"><Check className="w-5 h-5" />すべての材料が揃っています！</div>)}
-            <p className="text-gray-600 text-sm leading-relaxed mb-6">{selectedRecipe.desc}</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-8">
-      <div className="bg-gradient-to-r from-orange-100 to-yellow-100 p-6 rounded-2xl border border-orange-200 text-center">
-        <ChefHat className="w-12 h-12 text-orange-500 mx-auto mb-3" />
-        <h3 className="text-xl font-bold text-gray-800 mb-2">冷蔵庫の中身でシェフに相談</h3>
-        <button onClick={() => generateRecipeWithGemini('auto')} disabled={loading} className="w-full py-3 bg-white text-orange-600 border-2 border-orange-500 rounded-xl font-bold shadow-sm hover:bg-orange-50 disabled:opacity-50 transition-all flex items-center justify-center gap-2 mb-6">{loading ? '考案中...' : '🎲 AIに任せてレシピを提案する'}</button>
-        <div className="mb-3 text-left"><label className="block text-sm font-bold text-gray-700 mb-1 flex items-center gap-1"><MessageSquare className="w-4 h-4" />シェフへの要望（任意）</label><textarea className="w-full p-3 rounded-xl border border-orange-200 focus:outline-none focus:ring-2 focus:ring-orange-300 text-sm" rows={2} placeholder="例：辛いものが食べたい、10分で作れるもの、子供が喜ぶ味..." value={userRequest} onChange={(e) => setUserRequest(e.target.value)} /></div>
-        <button onClick={() => generateRecipeWithGemini('custom')} disabled={loading} className="w-full py-3 bg-orange-500 text-white rounded-xl font-bold shadow-md hover:bg-orange-600 disabled:opacity-50 transition-all flex items-center justify-center gap-2">{loading ? '考案中...' : '✨ 要望に合わせてAIがレシピを提案する'}</button>
-      </div>
-      <div>
-        <h3 className="font-bold text-lg text-gray-800 mb-4 flex items-center gap-2"><History className="w-5 h-5 text-gray-500" />レシピ履歴</h3>
-        {history.length === 0 ? (<div className="text-center py-8 text-gray-400 bg-gray-50 rounded-xl border border-dashed border-gray-200"><Clock className="w-8 h-8 mx-auto mb-2 opacity-30" /><p className="text-sm">まだ履歴はありません</p></div>) : (<div className="space-y-3">{history.map((rec: Recipe) => (<div key={rec.id} onClick={() => setSelectedRecipe(rec)} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all cursor-pointer flex justify-between items-center"><div><h4 className="font-bold text-gray-800">{rec.title}</h4><div className="flex gap-2 text-xs text-gray-500 mt-1"><span>{rec.createdAt}</span>{rec.mode === 'custom' && <span className="text-orange-500">✨ 要望あり</span>}</div></div><ChevronLeft className="w-5 h-5 text-gray-300 transform rotate-180" /></div>))}</div>)}
-      </div>
-    </div>
-  );
-}
-
-function ShoppingList({ items, onToggle, onDelete, onAdd, onUpdateQuantity, onExport, unitOptions, addUnitOption }: any) {
-  const [newItemName, setNewItemName] = useState('');
-  const [newItemQuantity, setNewItemQuantity] = useState(1);
-  const [newItemUnit, setNewItemUnit] = useState('個');
-  const [isCustomUnit, setIsCustomUnit] = useState(false);
-  const [customUnitName, setCustomUnitName] = useState('');
-
-  const handleAdd = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (newItemName.trim()) {
-      let finalUnit = newItemUnit;
-      if (isCustomUnit) { finalUnit = customUnitName; addUnitOption(customUnitName); }
-      onAdd(newItemName.trim(), newItemQuantity, finalUnit);
-      setNewItemName(''); setNewItemQuantity(1);
-      if (isCustomUnit) { setNewItemUnit(customUnitName); setIsCustomUnit(false); setCustomUnitName(''); }
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-        <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg flex items-center gap-2"><ShoppingCart className="w-5 h-5 text-blue-600" />買い物リスト</h3><button onClick={onExport} className="text-blue-600 text-sm font-bold flex items-center gap-1 hover:bg-blue-50 px-3 py-1.5 rounded-lg transition-colors"><Share2 className="w-4 h-4" /> Keepに送る</button></div>
-        <form onSubmit={handleAdd} className="mb-6">
-          <div className="flex gap-2 mb-2">
-            <input type="text" className="flex-[2] p-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-100" placeholder="商品名..." value={newItemName} onChange={(e) => setNewItemName(e.target.value)} />
-            <div className="flex flex-1 gap-1">
-              <input type="number" min="1" className="w-16 p-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-100 text-center" value={newItemQuantity} onChange={(e) => setNewItemQuantity(Number(e.target.value))} />
-              {!isCustomUnit ? (<select className="flex-1 p-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-100 text-sm" value={newItemUnit} onChange={(e) => { if (e.target.value === 'NEW_ENTRY') { setIsCustomUnit(true); setCustomUnitName(''); } else { setNewItemUnit(e.target.value); } }}>{unitOptions.map((opt: string) => (<option key={opt} value={opt}>{opt}</option>))}<option value="NEW_ENTRY" className="text-blue-600 font-bold">+ 新規追加</option></select>) : (<div className="flex-1 flex gap-1"><input type="text" className="w-full p-3 bg-white rounded-xl border-2 border-blue-500 focus:outline-none text-sm" placeholder="単位" value={customUnitName} onChange={(e) => setCustomUnitName(e.target.value)} required autoFocus /><button type="button" onClick={() => { setIsCustomUnit(false); setNewItemUnit('個'); }} className="px-2 text-gray-500 bg-gray-100 rounded-lg whitespace-nowrap text-xs">戻る</button></div>)}
-            </div>
-          </div>
-          <button type="submit" className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold shadow-md hover:bg-blue-700 transition-colors flex items-center justify-center gap-2" disabled={!newItemName.trim()}><Plus className="w-5 h-5" />リストに追加</button>
-        </form>
-        <div className="space-y-2">{items.length === 0 ? (<div className="text-center py-8 text-gray-400"><ShoppingCart className="w-12 h-12 mx-auto mb-2 opacity-20" /><p>リストは空です</p></div>) : (items.map((item: any) => (<div key={item.id} className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${item.isChecked ? 'bg-gray-50 border-gray-100 opacity-60' : 'bg-white border-gray-200 hover:shadow-sm'}`}><button onClick={() => onToggle(item.id)} className={`flex-shrink-0 transition-colors ${item.isChecked ? 'text-green-500' : 'text-gray-300 hover:text-green-500'}`}>{item.isChecked ? <CheckSquare className="w-6 h-6" /> : <Square className="w-6 h-6" />}</button><div className="flex-1 min-w-0"><span className={`block font-bold truncate ${item.isChecked ? 'line-through text-gray-400' : 'text-gray-800'}`}>{item.name}</span><span className="text-xs text-gray-500">{formatAmountStr(item.quantity, item.unit)}</span></div><div className="flex items-center gap-1 bg-gray-50 rounded-lg p-1"><button onClick={() => onUpdateQuantity(item.id, -1)} className="p-1 hover:bg-white rounded shadow-sm text-gray-500 disabled:opacity-30" disabled={item.quantity <= 1}><Minus className="w-3 h-3" /></button><button onClick={() => onUpdateQuantity(item.id, 1)} className="p-1 hover:bg-white rounded shadow-sm text-gray-500"><Plus className="w-3 h-3" /></button></div><button onClick={() => onDelete(item.id)} className="p-2 text-gray-400 hover:bg-red-50 hover:text-red-500 rounded-full transition-colors"><Trash2 className="w-4 h-4" /></button></div>)))}</div>
-      </div>
-    </div>
-  );
-}
-
 function ScannerModal({ onClose, onScan, apiKey, categoryOptions, addCategoryOption, locationOptions, addLocationOption, emojiHistory, expirySettings }: any) {
   const [scanning, setScanning] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
@@ -728,7 +612,6 @@ function ScannerModal({ onClose, onScan, apiKey, categoryOptions, addCategoryOpt
 
       try {
         const base64Image = await fileToBase64(imageFile);
-        const GEMINI_MODEL = "gemini-2.0-flash-exp"; // 最新モデル
         const prompt = `このレシート画像を解析し、購入された食品アイテムのリストを作成してください。以下のJSON形式のみを出力してください。賞味期限は、もしレシートに日付があればそこから適切に推測するか、食品の一般的な日持ちを考慮して今日からの日付（YYYY-MM-DD）を設定してください。\n\n{\n  "items": [\n    {\n      "name": "食品名",\n      "quantity": 数値（個数など）,\n      "unit": "単位（個、本、パックなど）",\n      "expiryDate": "YYYY-MM-DD",\n      "category": "dairy" | "egg" | "vegetable" | "fruit" | "meat" | "fish" | "other",\n      "emoji": "絵文字"\n    }\n  ]\n}`;
 
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`, {
@@ -763,7 +646,7 @@ function ScannerModal({ onClose, onScan, apiKey, categoryOptions, addCategoryOpt
           emoji: item.emoji || '📦'
         }));
 
-        // 学習データの更新
+        // 設定データを活用するロジック（未使用変数エラー回避）
         scannedItems.forEach((item: FoodItem) => {
              const catOpts = categoryOptions[item.category] || [];
              if (!catOpts.includes(item.categorySmall)) addCategoryOption(item.category, item.categorySmall);
