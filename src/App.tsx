@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo, ChangeEvent } from 'react';
-import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Check, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles, Scan } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Check, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles } from 'lucide-react';
 import Tesseract from 'tesseract.js';
 
 // --- 型定義 ---
@@ -173,7 +173,7 @@ export default function App() {
         {activeTab === 'shopping' && <ShoppingList items={shoppingList} onToggle={toggleShoppingItem} onDelete={deleteShoppingItem} onAdd={addToShoppingList} onUpdateQuantity={updateShoppingItemQuantity} onExport={exportToKeep} unitOptions={unitOptions} addUnitOption={addUnitOption} />}
         {activeTab === 'settings' && <SettingsScreen categoryOptions={categoryOptions} expirySettings={expirySettings} setExpirySettings={setExpirySettings} stockThresholds={stockThresholds} setStockThresholds={setStockThresholds} showToast={showToast} apiKey={geminiApiKey} saveApiKey={saveApiKey} />}
       </main>
-      {showScannerModal && <ScannerModal onClose={() => setShowScannerModal(false)} categoryOptions={categoryOptions} addCategoryOption={addCategoryOption} locationOptions={locationOptions} addLocationOption={addLocationOption} expirySettings={expirySettings} emojiHistory={emojiHistory} onScan={(scannedItems: FoodItem[]) => { setItems([...items, ...scannedItems]); setShowScannerModal(false); showToast(`${scannedItems.length}件のアイテムを読み取りました`); }} />}
+      {showScannerModal && <ScannerModal onClose={() => setShowScannerModal(false)} onScan={(scannedItems: FoodItem[]) => { setItems([...items, ...scannedItems]); setShowScannerModal(false); showToast(`${scannedItems.length}件のアイテムを読み取りました`); }} expirySettings={expirySettings} />}
     </div>
   );
 }
@@ -655,13 +655,12 @@ function ShoppingList({ items, onToggle, onDelete, onAdd, onUpdateQuantity, onEx
   );
 }
 
-function ScannerModal({ onClose, onScan, categoryOptions, addCategoryOption, locationOptions, addLocationOption, emojiHistory, expirySettings }: any) {
+function ScannerModal({ onClose, onScan, expirySettings }: any) {
   const [scanning, setScanning] = useState(false);
   const [ocrText, setOcrText] = useState('');
   const [ocrProgress, setOcrProgress] = useState(0);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
 
-  // レシートOCR処理
   const handleReceiptCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const imageFile = e.target.files[0];
@@ -677,22 +676,19 @@ function ScannerModal({ onClose, onScan, categoryOptions, addCategoryOption, loc
 
   const handleOcrComplete = () => {
     const lines = ocrText.split('\n').filter(line => line.trim() !== '');
+    const EMOJI_KEYWORDS: Record<string, string> = { '牛': '🥩', '豚': '🥩', '鶏': '🍗', '肉': '🥩', 'ハム': '🥩', '魚': '🐟', '鮭': '🐟', '鯖': '🐟', '鯵': '🐟', '鰯': '🐟', '鮪': '🐟', '刺身': '🐟', 'エビ': '🦐', 'カニ': '🦀', '牛乳': '🥛', 'ヨーグルト': '🥣', 'チーズ': '🧀', '卵': '🥚', 'キャベツ': '🥬', 'レタス': '🥬', '白菜': '🥬', 'トマト': '🍅', 'きゅうり': '🥒', 'ブロッコリー': '🥦', '人参': '🥕', '大根': '🥢', '玉ねぎ': '🧅', 'きのこ': '🍄', 'りんご': '🍎', 'みかん': '🍊', 'バナナ': '🍌', 'パン': '🍞', 'うどん': '🍜', 'カレー': '🍛', 'アイス': '🍨', 'チョコ': '🍫', '酒': '🍶', 'ビール': '🍺', 'ジュース': '🧃', '豆腐': '🧊', '納豆': '🥢' };
+    
     const scannedItems: FoodItem[] = lines.slice(0, Math.min(lines.length, 5)).map((line, index) => {
       let emoji = '📦';
-      const EMOJI_KEYWORDS: Record<string, string> = { '牛': '🥩', '豚': '🥩', '鶏': '🍗', '肉': '🥩', 'ハム': '🥩', '魚': '🐟', '鮭': '🐟', '鯖': '🐟', '鯵': '🐟', '鰯': '🐟', '鮪': '🐟', '刺身': '🐟', 'エビ': '🦐', 'カニ': '🦀', '牛乳': '🥛', 'ヨーグルト': '🥣', 'チーズ': '🧀', '卵': '🥚', 'キャベツ': '🥬', 'レタス': '🥬', '白菜': '🥬', 'トマト': '🍅', 'きゅうり': '🥒', 'ブロッコリー': '🥦', '人参': '🥕', '大根': '🥢', '玉ねぎ': '🧅', 'きのこ': '🍄', 'りんご': '🍎', 'みかん': '🍊', 'バナナ': '🍌', 'パン': '🍞', 'うどん': '🍜', 'カレー': '🍛', 'アイス': '🍨', 'チョコ': '🍫', '酒': '🍶', 'ビール': '🍺', 'ジュース': '🧃', '豆腐': '🧊', '納豆': '🥢' };
       for (const [key, val] of Object.entries(EMOJI_KEYWORDS)) { if (line.includes(key)) { emoji = val; break; } }
-      let expiryDate = '';
-      if (expirySettings[line]) { const d = new Date(); d.setDate(d.getDate() + expirySettings[line]); expiryDate = d.toISOString().split('T')[0]; }
       
-      const item: FoodItem = { id: Date.now().toString() + index, name: line.substring(0, 15), storage: 'refrigerator', category: 'other', categorySmall: line.substring(0, 15), location: '未設定', expiryDate: expiryDate, quantity: 1, unit: '個', addedDate: new Date().toISOString().split('T')[0], emoji: emoji };
-      return item;
+      let expiryDate = '';
+      if (expirySettings && expirySettings[line]) { 
+        const d = new Date(); d.setDate(d.getDate() + expirySettings[line]); expiryDate = d.toISOString().split('T')[0]; 
+      }
+      
+      return { id: Date.now().toString() + index, name: line.substring(0, 15), storage: 'refrigerator', category: 'other', categorySmall: line.substring(0, 15), location: '未設定', expiryDate: expiryDate, quantity: 1, unit: '個', addedDate: new Date().toISOString().split('T')[0], emoji: emoji };
     });
-
-    scannedItems.forEach(item => {
-       const opts = categoryOptions[item.category] || [];
-       if (!opts.includes(item.categorySmall)) addCategoryOption(item.category, item.categorySmall);
-    });
-
     onScan(scannedItems);
   };
 
