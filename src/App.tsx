@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Check, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles } from 'lucide-react';
+import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Check, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles, Scan } from 'lucide-react';
 
 // --- 型定義 ---
 type StorageType = 'refrigerator' | 'freezer_main' | 'freezer_sub' | 'vegetable' | 'ambient';
@@ -10,54 +10,27 @@ interface ShoppingItem { id: string; name: string; quantity: number; unit: strin
 interface RecipeMaterial { name: string; amount: number | string; unit: string; }
 interface Recipe { id: string; title: string; time: string; ingredients: RecipeMaterial[]; missing: RecipeMaterial[]; desc: string; mode: 'auto' | 'custom'; createdAt: string; userRequest?: string; allMaterials: RecipeMaterial[]; }
 
-// --- 定数 ---
-// 最新のFlashモデルを指定
-const GEMINI_MODEL = "gemini-2.0-flash-exp";
-
-// --- ヘルパー関数 ---
+// --- 定数 & ヘルパー ---
+const GEMINI_MODEL = "gemini-2.0-flash-exp"; 
 const formatAmountStr = (amount: number | string, unit: string) => { const nonNumericUnits = ['少々', '適量', 'お好みで', 'ひとつまみ', '適宜']; return nonNumericUnits.includes(unit) ? unit : `${amount}${unit}`; };
-const fileToBase64 = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => { const result = reader.result as string; resolve(result.split(',')[1]); };
-    reader.onerror = error => reject(error);
-  });
-};
-const loadFromStorage = <T,>(key: string, initialValue: T): T => {
-  try {
-    const item = window.localStorage.getItem(key);
-    return item ? JSON.parse(item) : initialValue;
-  } catch (error) { console.error(error); return initialValue; }
-};
+const fileToBase64 = (file: File): Promise<string> => new Promise((resolve, reject) => { const reader = new FileReader(); reader.readAsDataURL(file); reader.onload = () => resolve((reader.result as string).split(',')[1]); reader.onerror = reject; });
+const loadFromStorage = <T,>(key: string, val: T): T => { try { const item = window.localStorage.getItem(key); return item ? JSON.parse(item) : val; } catch { return val; } };
 
 // --- 初期データ（圧縮） ---
-const INITIAL_ITEMS: FoodItem[] = [
-  { id: '1', name: '牛乳', storage: 'refrigerator', category: 'dairy', categorySmall: '牛乳', location: 'ドアポケット', expiryDate: new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0], quantity: 1, unit: '本', addedDate: '2023-10-25', emoji: '🥛' },
-  { id: '2', name: '卵', storage: 'refrigerator', category: 'egg', categorySmall: '卵', location: '上段', expiryDate: new Date(Date.now() + 86400000 * 5).toISOString().split('T')[0], quantity: 2, unit: '個', addedDate: '2023-10-20', emoji: '🥚' },
-  { id: '3', name: '豚バラ肉', storage: 'freezer_main', category: 'meat', categorySmall: '豚肉', location: '上段トレー', expiryDate: new Date(Date.now() + 86400000 * 20).toISOString().split('T')[0], quantity: 200, unit: 'g', addedDate: '2023-10-15', emoji: '🥩' },
-];
+const INITIAL_ITEMS: FoodItem[] = [{ id: '1', name: '牛乳', storage: 'refrigerator', category: 'dairy', categorySmall: '牛乳', location: 'ドアポケット', expiryDate: new Date(Date.now() + 172800000).toISOString().split('T')[0], quantity: 1, unit: '本', addedDate: '2023-10-25', emoji: '🥛' }];
 const INITIAL_SHOPPING_LIST: ShoppingItem[] = [{ id: 's1', name: '醤油', quantity: 1, unit: '本', isChecked: false, addedDate: '2023-10-25' }];
 const INITIAL_UNIT_OPTIONS = ['個', '本', 'g', 'kg', 'ml', 'L', 'パック', '玉', '袋', '束', '枚', '切れ', '缶', '瓶', '箱', '少々', '適量'];
-const EMOJI_LIBRARY: Record<string, string[]> = {
-  '野菜・果物': ['🥦','🥬','🥒','🌽','🥕','🥔','🍠','🍆','🍅','🍄','🧅','🧄','🥗','🌶️','🫑','🥑','🍎','🍏','🍐','🍊','🍋','🍌','🍉','🍇','🍓','🫐','🍈','🍒','🍑','🥭','🍍','🥥','🥝','🫒','🥜','🌰','🫘','🌿','🌾','🎋','🍃','🍂','🍁','🎍','🪵','🌵','☘️','🌱','🪴','🌻','🌹','🪷'],
-  '肉・魚・卵': ['🥩','🍗','🥓','🍖','🍔','🌭','🐟','🐠','🐡','🦐','🦞','🦀','🦑','🐙','🍣','🍱','🥚','🍳','🦈','🐳','🐋','🐬','🦪','🍥','🍤','🦃','🐓','🐖','🐄','🐂','🐃','🐑','🐐','🦌','🐗'],
-  '乳製品・飲料': ['🥛','🧀','🧈','🍦','🍮','🍼','🍵','☕','🧃','🥤','🍺','🍷','🍶','🥃','🍸','🧉','🍾','🥂','🍻','🧊','🫖','🍹','🩸','💧','🥣','🫙'],
-  '穀物・麺類': ['🍚','🍙','🍛','🍜','🍝','🍞','🥐','🥖','🥨','🥯','🥞','🧇','🍟','🍕','🌮','🌯','🥡','🥪','🫓','🥟','🥠','🍘','🍠','🍢','🍡','🥘','🍲','🫕','🥙','🧆','🍔','🌭'],
-  'スイーツ・調味料': ['🍫','🍬','🍭','🍡','🍩','🍪','🍰','🧁','🍯','🧂','🥢','🥄','🍧','🍨','🥧','🎂','🍮','🥞','🧇','🥮','🍿','🫙','🏺'],
-  'その他': ['📦','🍱','🥡','🥫','🛍️','🛒','🎁','🍽️','🍴','🔪','🔥','❄️','⚡','🧺','🧻','🧼','🧽','🧹','🗑️','💊','🩹','🌡️','🧸','🎈','🎉']
-};
-const EMOJI_KEYWORDS: Record<string, string> = { '牛': '🥩', '豚': '🥩', '鶏': '🍗', '肉': '🥩', 'ハム': '🥩', 'ソーセージ': '🌭', 'ベーコン': '🥓', 'ミンチ': '🥩', 'ステーキ': '🥩', '焼肉': '🥩', '魚': '🐟', '鮭': '🐟', '鯖': '🐟', '鯵': '🐟', '鰯': '🐟', '鮪': '🐟', '刺身': '🐟', '切り身': '🐟', 'エビ': '🦐', '海老': '🦐', 'カニ': '🦀', '蟹': '🦀', 'イカ': '🦑', 'タコ': '🐙', '貝': '🦪', 'あさり': '🦪', 'しじみ': '🦪', '牛乳': '🥛', 'ミルク': '🥛', '豆乳': '🧃', '乳飲料': '🧃', 'ヨーグルト': '🥣', 'のむヨーグルト': '🧃', 'カップヨーグルト': '🥣', 'チーズ': '🧀', 'バター': '🧈', 'マーガリン': '🧈', 'クリーム': '🧁', '卵': '🥚', 'たまご': '🥚', '玉子': '🥚', 'うずら': '🥚', 'キャベツ': '🥬', 'レタス': '🥬', '白菜': '🥬', 'ほうれん草': '🥬', '小松菜': '🥬', '青梗菜': '🥬', 'ニラ': '🥬', '春菊': '🥬', 'トマト': '🍅', 'ミニトマト': '🍅', 'なす': '🍆', 'ナス': '🍆', 'ピーマン': '🫑', 'パプリカ': '🫑', 'とうもろこし': '🌽', 'コーン': '🌽', 'きゅうり': '🥒', 'ブロッコリー': '🥦', 'カリフラワー': '🥦', 'アボカド': '🥑', 'アスパラ': '🎍', '芋': '🥔', 'ポテト': '🥔', 'じゃがいも': '🥔', 'さつまいも': '🍠', '里芋': '🥔', '長芋': '🥔', '人参': '🥕', 'にんじん': '🥕', '大根': '🥢', 'ごぼう': '🥢', 'レンコン': '🥢', '玉ねぎ': '🧅', 'タマネギ': '🧅', 'ネギ': '🧅', 'ねぎ': '🧅', 'ニンニク': '🧄', 'しょうが': '🫚', 'きのこ': '🍄', 'マッシュルーム': '🍄', 'しめじ': '🍄', '舞茸': '🍄', 'エリンギ': '🍄', '椎茸': '🍄', 'えのき': '🍄', 'りんご': '🍎', 'リンゴ': '🍎', '青りんご': '🍏', 'みかん': '🍊', 'オレンジ': '🍊', 'グレープフルーツ': '🍊', 'レモン': '🍋', 'ゆず': '🍋', 'バナナ': '🍌', 'ぶどう': '🍇', 'マスカット': '🍇', 'いちご': '🍓', 'メロン': '🍈', 'スイカ': '🍉', '桃': '🍑', 'さくらんぼ': '🍒', '梨': '🍐', 'パイナップル': '🍍', 'マンゴー': '🥭', 'キウイ': '🥝', 'ご飯': '🍚', '米': '🍚', 'おにぎり': '🍙', 'パン': '🍞', '食パン': '🍞', 'ロールパン': '🥐', 'クロワッサン': '🥐', 'バゲット': '🥖', 'フランスパン': '🥖', 'サンドイッチ': '🥪', 'ハンバーガー': '🍔', 'ピザ': '🍕', '中華まん': '🥟', '肉まん': '🥟', 'うどん': '🍜', 'そば': '🍜', 'ラーメン': '🍜', 'パスタ': '🍝', 'スパゲッティ': '🍝', '麺': '🍜', '焼きそば': '🥡', 'カレー': '🍛', 'シチュー': '🍲', '鍋': '🍲', 'スープ': '🥣', '味噌汁': '🥣', '弁当': '🍱', '寿司': '🍣', 'アイス': '🍨', 'ソフトクリーム': '🍦', 'チョコ': '🍫', 'クッキー': '🍪', 'ケーキ': '🍰', 'プリン': '🍮', 'ゼリー': '🍮', '団子': '🍡', '大福': '🍡', '和菓子': '🍵', 'ドーナツ': '🍩', 'キャンディ': '🍬', 'スナック': '🍿', 'ポテチ': '🥔', '酒': '🍶', 'ビール': '🍺', '発泡酒': '🍺', 'ワイン': '🍷', 'シャンパン': '🍾', 'チューハイ': '🍹', 'サワー': '🍹', 'ハイボール': '🥃', 'ウイスキー': '🥃', '焼酎': '🍶', '日本酒': '🍶', 'ジュース': '🧃', 'コーラ': '🥤', 'サイダー': '🥤', 'コーヒー': '☕', '珈琲': '☕', 'お茶': '🍵', '紅茶': '🫖', '水': '💧', 'ミネラルウォーター': '💧', '炭酸水': '💧', '塩': '🧂', '砂糖': '🫙', '醤油': '🫙', 'ソース': '🫙', 'マヨネーズ': '🫙', 'ケチャップ': '🫙', 'ドレッシング': '🫙', '油': '🫗', 'だし': '🍲', '豆腐': '🧊', '納豆': '🥢', 'こんにゃく': '🧊', 'ちくわ': '🥢', 'かまぼこ': '🍥', '缶詰': '🥫', 'ジャム': '🫙' };
+const EMOJI_KEYWORDS: Record<string, string> = { '牛': '🥩', '豚': '🥩', '鶏': '🍗', '肉': '🥩', '魚': '🐟', '鮭': '🐟', '鯖': '🐟', '海老': '🦐', '牛乳': '🥛', '卵': '🥚', 'キャベツ': '🥬', 'レタス': '🥬', 'トマト': '🍅', '人参': '🥕', '玉ねぎ': '🧅', 'りんご': '🍎', 'みかん': '🍊', 'バナナ': '🍌', 'パン': '🍞', 'うどん': '🍜', 'カレー': '🍛', 'アイス': '🍨', 'チョコ': '🍫', '酒': '🍶', 'ビール': '🍺', '豆腐': '🧊', '納豆': '🥢' };
+const EMOJI_LIBRARY: Record<string, string[]> = { '野菜・果物': ['🥦','🥬','🥒','🌽','🥕','🥔','🍅','🍆','🧅','🍎','🍊','🍌','🍇','🍓','🍑','🍍','🥝'], '肉・魚・卵': ['🥩','🍗','🥓','🍖','🍔','🐟','🐠','🦐','🦀','🦑','🍣','🥚','🍳'], '乳製品・飲料': ['🥛','🧀','🧈','🍦','🍵','☕','🧃','🥤','🍺','🍷'], '穀物・麺類': ['🍚','🍙','🍜','🍝','🍞','🥐','🥪','🍕'], 'その他': ['🍱','🥫','🥢','🍫','🍬','🍮','🧂','🥡'] };
 const CATEGORY_LABELS: Record<string, string> = { dairy: '🥛 乳製品', egg: '🥚 卵', meat: '🥩 肉類', fish: '🐟 魚介', vegetable: '🥦 野菜', fruit: '🍎 果物', other: '🥫 その他' };
-const INITIAL_CATEGORY_OPTIONS: Record<ItemCategory, string[]> = { dairy: ['牛乳', 'ヨーグルト', 'チーズ', 'バター', '生クリーム'], egg: ['卵', 'うずらの卵', '温泉卵'], meat: ['豚肉', '牛肉', '鶏肉', 'ハム', 'ソーセージ'], fish: ['鮭', 'サバ', 'ブリ', '刺身'], vegetable: ['キャベツ', '人参', '玉ねぎ', 'トマト', 'レタス', 'じゃがいも', 'きゅうり'], fruit: ['りんご', 'バナナ', 'みかん', 'レモン', 'いちご'], other: ['冷凍うどん', 'アイス', '豆腐', '納豆'] };
-const INITIAL_LOCATION_OPTIONS: Record<StorageType, string[]> = { refrigerator: ['ドアポケット', '上段', '中段', '下段', 'チルドルーム', '低温スペース'], freezer_main: ['上段トレー', '下段引き出し'], freezer_sub: ['製氷室横'], vegetable: ['上段トレイ', '下段'], ambient: ['パントリー', 'キッチン棚', 'カゴ', '床下収納'] };
-const DEFAULT_EXPIRY_DAYS: Record<string, number> = { '牛乳': 7, '卵': 14, '納豆': 10, 'ヨーグルト': 14, '豚肉': 3, '牛肉': 3, '鶏肉': 2, 'ハム': 10, 'キャベツ': 7, 'レタス': 4, 'トマト': 5, '冷凍うどん': 30, 'アイス': 90, '玉ねぎ': 30, 'りんご': 14, 'バナナ': 4, 'みかん': 7 };
-const DEFAULT_STOCK_THRESHOLDS: Record<string, number> = { '卵': 3, '牛乳': 1, '納豆': 1, '玉ねぎ': 1, '人参': 1 };
+const INITIAL_CATEGORY_OPTIONS: Record<ItemCategory, string[]> = { dairy: ['牛乳','ヨーグルト','チーズ'], egg: ['卵'], meat: ['豚肉','牛肉','鶏肉','ハム'], fish: ['鮭','サバ'], vegetable: ['キャベツ','人参','玉ねぎ','トマト'], fruit: ['りんご','バナナ','みかん'], other: ['豆腐','納豆'] };
+const INITIAL_LOCATION_OPTIONS: Record<StorageType, string[]> = { refrigerator: ['ドアポケット','上段','中段'], freezer_main: ['上段','下段'], freezer_sub: ['製氷室横'], vegetable: ['上段','下段'], ambient: ['棚','カゴ'] };
+const DEFAULT_EXPIRY_DAYS: Record<string, number> = { '牛乳':7, '卵':14, '納豆':10, '豚肉':3, '牛肉':3, '鶏肉':2, 'キャベツ':7, 'レタス':4, 'トマト':5, '玉ねぎ':30, 'りんご':14 };
+const DEFAULT_STOCK_THRESHOLDS: Record<string, number> = { '卵':3, '牛乳':1, '納豆':1 };
 
-// --- コンポーネント実装 ---
-
+// --- アプリケーション本体 ---
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'inventory' | 'add' | 'recipes' | 'shopping' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard'|'inventory'|'add'|'recipes'|'shopping'|'settings'>('dashboard');
   
   // データの永続化
   const [items, setItems] = useState<FoodItem[]>(() => loadFromStorage('sf_items', INITIAL_ITEMS));
@@ -97,16 +70,8 @@ export default function App() {
     if (savedKey) setGeminiApiKey(savedKey);
   }, []);
 
-  const saveApiKey = (key: string) => {
-    setGeminiApiKey(key);
-    localStorage.setItem('GEMINI_API_KEY', key);
-    showToast('APIキーを保存しました');
-  };
-
-  const showToast = (msg: string) => {
-    setNotification(msg);
-    setTimeout(() => setNotification(null), 3000);
-  };
+  const saveApiKey = (key: string) => { setGeminiApiKey(key); localStorage.setItem('GEMINI_API_KEY', key); showToast('APIキーを保存しました'); };
+  const showToast = (msg: string) => { setNotification(msg); setTimeout(() => setNotification(null), 3000); };
 
   const addCategoryOption = (category: ItemCategory, newOption: string) => {
     setCategoryOptions((prev: any) => {
@@ -114,84 +79,46 @@ export default function App() {
       return !currentOptions.includes(newOption) ? { ...prev, [category]: [...currentOptions, newOption] } : prev;
     });
   };
-
   const addLocationOption = (storage: StorageType, newOption: string) => {
     setLocationOptions((prev: any) => {
       const currentOptions = prev[storage] || [];
       return !currentOptions.includes(newOption) ? { ...prev, [storage]: [...currentOptions, newOption] } : prev;
     });
   };
-
-  const addUnitOption = (newUnit: string) => {
-    setUnitOptions(prev => !prev.includes(newUnit) ? [...prev, newUnit] : prev);
-  };
-
-  const updateEmojiHistory = (name: string, emoji: string) => {
-    setEmojiHistory(prev => ({ ...prev, [name]: emoji }));
-  };
-
-  const addRecipeToHistory = (recipe: Recipe) => {
-    setRecipeHistory(prev => [recipe, ...prev]);
-  };
+  const addUnitOption = (newUnit: string) => { setUnitOptions(prev => !prev.includes(newUnit) ? [...prev, newUnit] : prev); };
+  const updateEmojiHistory = (name: string, emoji: string) => { setEmojiHistory(prev => ({ ...prev, [name]: emoji })); };
+  const addRecipeToHistory = (recipe: Recipe) => { setRecipeHistory(prev => [recipe, ...prev]); };
 
   const addToShoppingList = (itemName: string, quantity: number = 1, unit: string = '個') => {
     setShoppingList(prev => {
-      if (prev.some(item => item.name === itemName)) {
-        showToast(`${itemName} は既にリストにあります`);
-        return prev;
-      }
-      return [...prev, {
-        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-        name: itemName, quantity, unit, isChecked: false, addedDate: new Date().toISOString().split('T')[0]
-      }];
+      if (prev.some(item => item.name === itemName)) { showToast(`${itemName} は既にリストにあります`); return prev; }
+      return [...prev, { id: Date.now().toString(), name: itemName, quantity, unit, isChecked: false, addedDate: new Date().toISOString().split('T')[0] }];
     });
     showToast(`${itemName} を買い物リストに追加しました`);
   };
 
-  const toggleShoppingItem = (id: string) => {
-    setShoppingList(prev => prev.map(item => item.id === id ? { ...item, isChecked: !item.isChecked } : item));
-  };
-
-  const deleteShoppingItem = (id: string) => {
-    setShoppingList(prev => prev.filter(item => item.id !== id));
-  };
-
-  const updateShoppingItemQuantity = (id: string, delta: number) => {
-    setShoppingList(prev => prev.map(item => item.id === id ? { ...item, quantity: Math.max(1, item.quantity + delta) } : item));
-  };
+  const toggleShoppingItem = (id: string) => { setShoppingList(prev => prev.map(item => item.id === id ? { ...item, isChecked: !item.isChecked } : item)); };
+  const deleteShoppingItem = (id: string) => { setShoppingList(prev => prev.filter(item => item.id !== id)); };
+  const updateShoppingItemQuantity = (id: string, delta: number) => { setShoppingList(prev => prev.map(item => item.id === id ? { ...item, quantity: Math.max(1, item.quantity + delta) } : item)); };
 
   const lowStockItems = useMemo(() => {
     const groupedStock: Record<string, number> = {};
     items.forEach(item => { const key = item.categorySmall || item.name; groupedStock[key] = (groupedStock[key] || 0) + item.quantity; });
     const lowStockList: string[] = [];
-    Object.keys(stockThresholds).forEach(key => {
-      const threshold = stockThresholds[key];
-      if (typeof threshold === 'number' && threshold > 0 && (groupedStock[key] || 0) < threshold) lowStockList.push(key);
-    });
+    Object.keys(stockThresholds).forEach(key => { if ((groupedStock[key] || 0) < stockThresholds[key]) lowStockList.push(key); });
     return lowStockList;
   }, [items, stockThresholds]);
 
   const statusCounts = useMemo(() => {
     const today = new Date().toISOString().split('T')[0];
-    const threeDaysLater = new Date(Date.now() + 86400000 * 3).toISOString().split('T')[0];
-    let expired = 0; let warning = 0;
-    items.forEach(item => {
-      if (item.expiryDate < today) expired++;
-      else if (item.expiryDate <= threeDaysLater) warning++;
-    });
+    const threeDaysLater = new Date(Date.now() + 259200000).toISOString().split('T')[0];
+    let expired = 0, warning = 0;
+    items.forEach(item => { if (item.expiryDate < today) expired++; else if (item.expiryDate <= threeDaysLater) warning++; });
     return { expired, warning, total: items.length, lowStock: lowStockItems.length };
   }, [items, lowStockItems]);
 
-  const deleteItem = (id: string) => {
-    setItems(items.filter(i => i.id !== id));
-    showToast('商品を削除しました');
-  };
-
-  const exportToKeep = () => {
-    const text = shoppingList.filter(i => !i.isChecked).map(i => `・${i.name} ${formatAmountStr(i.quantity, i.unit)}`).join('\n');
-    console.log(text);
-    showToast('Google Keepのリストに追加しました (Demo)');
-  };
+  const deleteItem = (id: string) => { setItems(items.filter(i => i.id !== id)); showToast('商品を削除しました'); };
+  const exportToKeep = () => { console.log(shoppingList.filter(i => !i.isChecked).map(i => `・${i.name} ${formatAmountStr(i.quantity, i.unit)}`).join('\n')); showToast('Google Keepのリストに追加しました (Demo)'); };
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800 font-sans pb-20 md:pb-0 md:pl-64">
@@ -206,23 +133,7 @@ export default function App() {
         {activeTab === 'shopping' && <ShoppingList items={shoppingList} onToggle={toggleShoppingItem} onDelete={deleteShoppingItem} onAdd={addToShoppingList} onUpdateQuantity={updateShoppingItemQuantity} onExport={exportToKeep} unitOptions={unitOptions} addUnitOption={addUnitOption} />}
         {activeTab === 'settings' && <SettingsScreen categoryOptions={categoryOptions} expirySettings={expirySettings} setExpirySettings={setExpirySettings} stockThresholds={stockThresholds} setStockThresholds={setStockThresholds} showToast={showToast} apiKey={geminiApiKey} saveApiKey={saveApiKey} />}
       </main>
-      {showScannerModal && (
-        <ScannerModal 
-          onClose={() => setShowScannerModal(false)} 
-          onScan={(scannedItems: FoodItem[]) => { 
-            setItems([...items, ...scannedItems]); 
-            setShowScannerModal(false); 
-            showToast(`${scannedItems.length}件のアイテムを解析しました`); 
-          }} 
-          apiKey={geminiApiKey}
-          categoryOptions={categoryOptions}
-          addCategoryOption={addCategoryOption}
-          locationOptions={locationOptions}
-          addLocationOption={addLocationOption}
-          emojiHistory={emojiHistory}
-          expirySettings={expirySettings}
-        />
-      )}
+      {showScannerModal && <ScannerModal onClose={() => setShowScannerModal(false)} onScan={(scannedItems: FoodItem[]) => { setItems([...items, ...scannedItems]); setShowScannerModal(false); showToast(`${scannedItems.length}件のアイテムを解析しました`); }} apiKey={geminiApiKey} categoryOptions={categoryOptions} addCategoryOption={addCategoryOption} locationOptions={locationOptions} addLocationOption={addLocationOption} emojiHistory={emojiHistory} expirySettings={expirySettings} />}
     </div>
   );
 }
@@ -230,14 +141,7 @@ export default function App() {
 // --- Subcomponents ---
 
 function Navigation({ activeTab, setActiveTab, counts }: any) {
-  const tabs = [
-    { id: 'dashboard', icon: LayoutDashboard, label: 'ホーム' },
-    { id: 'inventory', icon: Refrigerator, label: '冷蔵庫' },
-    { id: 'add', icon: Plus, label: '追加', isAction: true },
-    { id: 'recipes', icon: ChefHat, label: 'レシピ' },
-    { id: 'shopping', icon: ShoppingCart, label: '買い物' },
-    { id: 'settings', icon: Settings, label: '設定' }, 
-  ];
+  const tabs = [ { id: 'dashboard', icon: LayoutDashboard, label: 'ホーム' }, { id: 'inventory', icon: Refrigerator, label: '冷蔵庫' }, { id: 'add', icon: Plus, label: '追加', isAction: true }, { id: 'recipes', icon: ChefHat, label: 'レシピ' }, { id: 'shopping', icon: ShoppingCart, label: '買い物' }, { id: 'settings', icon: Settings, label: '設定' }];
   return (
     <>
       <div className="hidden md:flex flex-col w-64 bg-white h-screen fixed left-0 top-0 border-r border-gray-200 shadow-sm z-10">
@@ -292,7 +196,7 @@ function Dashboard({ items, counts, setActiveTab, setInventoryFilterMode }: any)
 const ItemCard = ({ item, deleteItem, onAddToShoppingList, isLowStock, threshold }: { item: FoodItem, deleteItem: (id: string) => void, onAddToShoppingList: (name: string, quantity?: number, unit?: string) => void, isLowStock?: boolean, threshold?: number }) => {
   const getStatusColor = (dateStr: string, lowStock?: boolean, quantity?: number) => {
     const today = new Date().toISOString().split('T')[0];
-    const threeDays = new Date(Date.now() + 86400000 * 3).toISOString().split('T')[0];
+    const threeDays = new Date(Date.now() + 259200000).toISOString().split('T')[0];
     if (quantity === 0) return 'bg-gray-100 border-gray-300 text-gray-500';
     if (dateStr < today) return 'bg-red-50 border-red-200 text-red-800';
     if (dateStr <= threeDays) return 'bg-yellow-50 border-yellow-200 text-yellow-800';
@@ -323,7 +227,6 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
   const [filter, setFilter] = useState<StorageType | 'all'>('all');
   const [sortBy, setSortBy] = useState<'expiry' | 'added' | 'name'>('expiry');
   const [isGrouped, setIsGrouped] = useState(true);
-
   const displayItems = useMemo(() => {
     let baseItems = [...items];
     if (inventoryFilterMode === 'lowStock') {
@@ -332,8 +235,6 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
        const missingFoodItems: FoodItem[] = missingNames.map((name: string) => {
          let determinedEmoji = '📦';
          let determinedCategory: ItemCategory = 'other';
-         // 簡易キーワードマッチング
-         const EMOJI_KEYWORDS: Record<string, string> = { '牛': '🥩', '豚': '🥩', '鶏': '🍗', '肉': '🥩', '魚': '🐟', '野菜': '🥦', '果物': '🍎' };
          for (const [key, emoji] of Object.entries(EMOJI_KEYWORDS)) { if (name.includes(key)) { determinedEmoji = emoji; break; } }
          return { id: `temp-${name}`, name: name, storage: 'ambient', category: determinedCategory, categorySmall: name, location: '', expiryDate: '', quantity: 0, unit: '個', addedDate: '', emoji: determinedEmoji };
        });
@@ -345,7 +246,7 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
   const filteredItems = displayItems.filter((item: any) => {
     if (inventoryFilterMode === 'lowStock') { const key = item.categorySmall || item.name; return lowStockItems.includes(key); }
     if (inventoryFilterMode === 'expired') { const today = new Date().toISOString().split('T')[0]; return item.expiryDate < today && item.quantity > 0; }
-    if (inventoryFilterMode === 'near') { const today = new Date().toISOString().split('T')[0]; const threeDaysLater = new Date(Date.now() + 86400000 * 3).toISOString().split('T')[0]; return item.expiryDate >= today && item.expiryDate <= threeDaysLater && item.quantity > 0; }
+    if (inventoryFilterMode === 'near') { const today = new Date().toISOString().split('T')[0]; const threeDaysLater = new Date(Date.now() + 259200000).toISOString().split('T')[0]; return item.expiryDate >= today && item.expiryDate <= threeDaysLater && item.quantity > 0; }
     return filter === 'all' ? true : item.storage === filter;
   });
 
@@ -357,12 +258,8 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
     return sorted;
   };
 
-  const filters: { id: StorageType | 'all', label: string, icon: any }[] = [
-    { id: 'all', label: 'すべて', icon: LayoutDashboard }, { id: 'refrigerator', label: '冷蔵室', icon: Refrigerator }, { id: 'vegetable', label: '野菜室', icon: Carrot }, { id: 'freezer_main', label: '冷凍(主)', icon: Snowflake }, { id: 'freezer_sub', label: '冷凍(副)', icon: IceCream }, { id: 'ambient', label: '常温', icon: Sun },
-  ];
-  const modeTabs: { id: FilterMode, label: string, icon: any, color: string }[] = [
-    { id: 'all', label: 'すべて', icon: LayoutDashboard, color: 'bg-gray-100 text-gray-600' }, { id: 'expired', label: '期限切れ', icon: AlertTriangle, color: 'bg-red-100 text-red-600' }, { id: 'near', label: '期限近', icon: AlertOctagon, color: 'bg-yellow-100 text-yellow-600' }, { id: 'lowStock', label: '在庫少', icon: TrendingDown, color: 'bg-blue-100 text-blue-600' },
-  ];
+  const filters: { id: StorageType | 'all', label: string, icon: any }[] = [{ id: 'all', label: 'すべて', icon: LayoutDashboard }, { id: 'refrigerator', label: '冷蔵室', icon: Refrigerator }, { id: 'vegetable', label: '野菜室', icon: Carrot }, { id: 'freezer_main', label: '冷凍(主)', icon: Snowflake }, { id: 'freezer_sub', label: '冷凍(副)', icon: IceCream }, { id: 'ambient', label: '常温', icon: Sun }];
+  const modeTabs: { id: FilterMode, label: string, icon: any, color: string }[] = [{ id: 'all', label: 'すべて', icon: LayoutDashboard, color: 'bg-gray-100 text-gray-600' }, { id: 'expired', label: '期限切れ', icon: AlertTriangle, color: 'bg-red-100 text-red-600' }, { id: 'near', label: '期限近', icon: AlertOctagon, color: 'bg-yellow-100 text-yellow-600' }, { id: 'lowStock', label: '在庫少', icon: TrendingDown, color: 'bg-blue-100 text-blue-600' }];
 
   return (
     <div className="space-y-4">
@@ -370,11 +267,7 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
         {modeTabs.map((tab) => (<button key={tab.id} onClick={() => setInventoryFilterMode(tab.id)} className={`flex flex-col items-center justify-center py-2 rounded-lg text-xs font-bold transition-all ${inventoryFilterMode === tab.id ? `${tab.color} ring-2 ring-offset-1 ring-gray-200` : 'text-gray-400 hover:bg-gray-50'}`}><tab.icon className="w-5 h-5 mb-1" />{tab.label}</button>))}
       </div>
       <div className="flex flex-col gap-3">
-        {inventoryFilterMode === 'all' && (
-          <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
-            {filters.map((tab) => (<button key={tab.id} onClick={() => setFilter(tab.id as any)} className={`flex items-center gap-2 px-4 py-2 rounded-full whitespace-nowrap transition-colors border flex-shrink-0 ${filter === tab.id ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-600 border-gray-200'}`}><tab.icon className="w-4 h-4" />{tab.label}</button>))}
-          </div>
-        )}
+        {inventoryFilterMode === 'all' && (<div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">{filters.map((tab) => (<button key={tab.id} onClick={() => setFilter(tab.id as any)} className={`flex items-center gap-2 px-4 py-2 rounded-full whitespace-nowrap transition-colors border flex-shrink-0 ${filter === tab.id ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-600 border-gray-200'}`}><tab.icon className="w-4 h-4" />{tab.label}</button>))}</div>)}
         <div className="flex flex-wrap justify-between items-center gap-3 bg-gray-50 p-3 rounded-xl border border-gray-100">
            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none hover:opacity-80 transition-opacity"><div className={`relative w-10 h-6 rounded-full transition-colors duration-200 ease-in-out ${isGrouped ? 'bg-green-500' : 'bg-gray-300'}`}><div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full shadow transform transition-transform duration-200 ease-in-out ${isGrouped ? 'translate-x-4' : 'translate-x-0'}`} /></div><input type="checkbox" className="hidden" checked={isGrouped} onChange={(e) => setIsGrouped(e.target.checked)} /><span className="font-bold text-xs sm:text-sm">カテゴリー</span></label>
           <div className="flex items-center gap-2 ml-auto"><ArrowUpDown className="w-4 h-4 text-gray-500" /><select className="p-2 text-sm bg-white border border-gray-200 rounded-lg text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-100 cursor-pointer" value={sortBy} onChange={(e) => setSortBy(e.target.value as any)}><option value="expiry">期限順</option><option value="added">登録順</option><option value="name">名前順</option></select></div>
@@ -420,7 +313,6 @@ function SettingsScreen({ categoryOptions, expirySettings, setExpirySettings, st
           <button onClick={() => setActiveTab('stock')} className={`flex-1 py-2 px-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'stock' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}><TrendingDown className="w-4 h-4 inline mr-1" />在庫アラート</button>
           <button onClick={() => setActiveTab('api')} className={`flex-1 py-2 px-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'api' ? 'bg-white text-purple-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}><Sparkles className="w-4 h-4 inline mr-1" />AI設定</button>
         </div>
-
         {activeTab === 'api' ? (
           <div>
             <h4 className="font-bold text-gray-800 mb-2">Google Gemini APIキー</h4>
@@ -475,12 +367,11 @@ function AddItemForm({ onAdd, onCancel, categoryOptions, addCategoryOption, expi
     const currentName = isCustomCategory ? customCategoryName : data.categorySmall;
     if (currentName) {
       if (emojiHistory[currentName]) { setData((prev: any) => ({ ...prev, emoji: emojiHistory[currentName] })); return; }
-      // 簡易キーワードマッチングは省略（必要なら復活可）
-    }
-    if (data.category) {
+      for (const [key, emoji] of Object.entries(EMOJI_KEYWORDS)) { if (currentName.includes(key)) { setData((prev: any) => ({ ...prev, emoji: emoji })); break; } }
+    } else if (data.category) {
       let defaultEmoji = '📦';
       if (data.category === 'dairy') defaultEmoji = '🥛'; else if (data.category === 'egg') defaultEmoji = '🥚'; else if (data.category === 'meat') defaultEmoji = '🥩'; else if (data.category === 'fish') defaultEmoji = '🐟'; else if (data.category === 'vegetable') defaultEmoji = '🥦'; else if (data.category === 'fruit') defaultEmoji = '🍎';
-      if (!currentName) setData((prev: any) => ({ ...prev, emoji: defaultEmoji }));
+      setData((prev: any) => ({ ...prev, emoji: defaultEmoji }));
     }
   }, [data.category, data.categorySmall, customCategoryName, isCustomCategory, emojiHistory]);
 
@@ -590,6 +481,118 @@ function AddItemForm({ onAdd, onCancel, categoryOptions, addCategoryOption, expi
         )}
       </form>
       {showEmojiPicker && <EmojiPicker onSelect={(emoji) => { setData({...data, emoji}); setShowEmojiPicker(false); }} onClose={() => setShowEmojiPicker(false)} />}
+    </div>
+  );
+}
+
+function RecipeGenerator({ items, onAddToShoppingList, history, onAddHistory, apiKey }: any) {
+  const [loading, setLoading] = useState(false);
+  const [userRequest, setUserRequest] = useState('');
+  const [selectedRecipe, setSelectedRecipe] = useState<any>(null);
+
+  const generateRecipeWithGemini = async (mode: 'auto' | 'custom') => {
+    setLoading(true);
+    if (!apiKey) { alert("APIキーが設定されていません。設定画面でキーを入力してください。"); setLoading(false); return; }
+    const inventoryList = items.map((i: any) => `${i.name} (${i.quantity}${i.unit})`).join(', ');
+    let prompt = `あなたはプロのシェフです。以下の食材リストにあるものを使って、家庭で作れる美味しいレシピを1つ提案してください。\n\n【食材リスト】\n${inventoryList}\n\n【条件】\n- 可能な限りリストにある食材を使用してください。\n- 足りない調味料や食材があれば「不足している材料」として挙げてくだい。\n- 出力は以下のJSON形式のみで行ってください。余計な説明は不要です。\n\n【JSON形式】\n{\n  "title": "料理名",\n  "time": "調理時間（例：20分）",\n  "desc": "料理の簡単な説明と魅力（100文字程度）",\n  "ingredients": [\n    {"name": "食材名", "amount": "分量", "unit": "単位"} \n  ],\n  "missing": [\n     {"name": "不足食材名", "amount": "分量", "unit": "単位"}\n  ]\n}`;
+    if (mode === 'custom' && userRequest) { prompt += `\n【ユーザーからの要望】\n${userRequest}\nこの要望を最大限反映してください。`; }
+
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+      });
+      const data = await response.json();
+      const text = data.candidates[0].content.parts[0].text;
+      const jsonStr = text.match(/\{[\s\S]*\}/)[0];
+      const recipeData = JSON.parse(jsonStr);
+      const newRecipe = { id: Date.now().toString(), ...recipeData, mode: mode, createdAt: new Date().toLocaleString(), userRequest: mode === 'custom' ? userRequest : undefined, allMaterials: [...recipeData.ingredients, ...recipeData.missing] };
+      onAddHistory(newRecipe);
+      setSelectedRecipe(newRecipe);
+    } catch (error) {
+      console.error("Gemini API Error:", error);
+      alert("レシピの生成に失敗しました。APIキーを確認するか、しばらく待ってから試してください。");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAddMissingItems = (recipe: any) => {
+    if (!recipe || !recipe.missing || recipe.missing.length === 0) return;
+    recipe.missing.forEach((item: RecipeMaterial) => { onAddToShoppingList(item.name, 1, item.unit); });
+  };
+
+  if (selectedRecipe) {
+    return (
+      <div className="space-y-4">
+        <button onClick={() => setSelectedRecipe(null)} className="flex items-center gap-1 text-gray-500 hover:text-gray-800 font-bold mb-2"><ChevronLeft className="w-5 h-5" /> 戻る</button>
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden animate-fade-in-up">
+          <div className="h-32 bg-gray-200 flex items-center justify-center bg-cover bg-center" style={{backgroundImage: 'url("https://images.unsplash.com/photo-1512058564366-18510be2db19?ixlib=rb-1.2.1&auto=format&fit=crop&w=800&q=80")'}}><span className="bg-black/40 text-white px-3 py-1 rounded-full text-sm backdrop-blur-sm">Image Preview</span></div>
+          <div className="p-6">
+            <div className="flex justify-between items-start mb-2"><h3 className="text-xl font-bold text-gray-800">{selectedRecipe.title}</h3><span className="text-xs text-gray-400">{selectedRecipe.createdAt}</span></div>
+            <div className="flex gap-2 text-sm text-gray-500 mb-4"><span>⏱ {selectedRecipe.time}</span><span>👨‍🍳 {selectedRecipe.mode === 'custom' ? '要望対応' : '簡単'}</span></div>
+            <div className="mb-4"><h4 className="font-bold text-sm text-gray-700 mb-2">使用する在庫</h4><div className="flex flex-wrap gap-2">{selectedRecipe.ingredients.length > 0 ? (selectedRecipe.ingredients.map((i: RecipeMaterial, idx: number) => (<span key={idx} className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs">{i.name} {i.amount}{i.unit}</span>))) : (<span className="text-gray-400 text-xs">なし</span>)}</div></div>
+            {selectedRecipe.missing && selectedRecipe.missing.length > 0 ? (
+              <div className="mb-4"><h4 className="font-bold text-sm text-red-700 mb-2 flex items-center gap-1"><AlertTriangle className="w-3 h-3" />不足している材料</h4><div className="flex flex-wrap gap-2 mb-3">{selectedRecipe.missing.map((i: RecipeMaterial, idx: number) => (<span key={idx} className="bg-red-50 text-red-700 border border-red-100 px-2 py-1 rounded text-xs">{i.name} {i.amount}{i.unit}</span>))}</div><button onClick={() => handleAddMissingItems(selectedRecipe)} className="w-full py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg text-sm font-bold hover:bg-red-100 flex items-center justify-center gap-2 transition-colors"><Plus className="w-4 h-4" />不足している{selectedRecipe.missing.length}点を買い物リストへ</button></div>
+            ) : (<div className="mb-4 bg-green-50 border border-green-200 p-3 rounded-lg flex items-center gap-2 text-green-700 text-sm font-bold"><Check className="w-5 h-5" />すべての材料が揃っています！</div>)}
+            <p className="text-gray-600 text-sm leading-relaxed mb-6">{selectedRecipe.desc}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-8">
+      <div className="bg-gradient-to-r from-orange-100 to-yellow-100 p-6 rounded-2xl border border-orange-200 text-center">
+        <ChefHat className="w-12 h-12 text-orange-500 mx-auto mb-3" />
+        <h3 className="text-xl font-bold text-gray-800 mb-2">冷蔵庫の中身でシェフに相談</h3>
+        <button onClick={() => generateRecipeWithGemini('auto')} disabled={loading} className="w-full py-3 bg-white text-orange-600 border-2 border-orange-500 rounded-xl font-bold shadow-sm hover:bg-orange-50 disabled:opacity-50 transition-all flex items-center justify-center gap-2 mb-6">{loading ? '考案中...' : '🎲 AIに任せてレシピを提案する'}</button>
+        <div className="mb-3 text-left"><label className="block text-sm font-bold text-gray-700 mb-1 flex items-center gap-1"><MessageSquare className="w-4 h-4" />シェフへの要望（任意）</label><textarea className="w-full p-3 rounded-xl border border-orange-200 focus:outline-none focus:ring-2 focus:ring-orange-300 text-sm" rows={2} placeholder="例：辛いものが食べたい、10分で作れるもの、子供が喜ぶ味..." value={userRequest} onChange={(e) => setUserRequest(e.target.value)} /></div>
+        <button onClick={() => generateRecipeWithGemini('custom')} disabled={loading} className="w-full py-3 bg-orange-500 text-white rounded-xl font-bold shadow-md hover:bg-orange-600 disabled:opacity-50 transition-all flex items-center justify-center gap-2">{loading ? '考案中...' : '✨ 要望に合わせてAIがレシピを提案する'}</button>
+      </div>
+      <div>
+        <h3 className="font-bold text-lg text-gray-800 mb-4 flex items-center gap-2"><History className="w-5 h-5 text-gray-500" />レシピ履歴</h3>
+        {history.length === 0 ? (<div className="text-center py-8 text-gray-400 bg-gray-50 rounded-xl border border-dashed border-gray-200"><Clock className="w-8 h-8 mx-auto mb-2 opacity-30" /><p className="text-sm">まだ履歴はありません</p></div>) : (<div className="space-y-3">{history.map((rec: Recipe) => (<div key={rec.id} onClick={() => setSelectedRecipe(rec)} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-all cursor-pointer flex justify-between items-center"><div><h4 className="font-bold text-gray-800">{rec.title}</h4><div className="flex gap-2 text-xs text-gray-500 mt-1"><span>{rec.createdAt}</span>{rec.mode === 'custom' && <span className="text-orange-500">✨ 要望あり</span>}</div></div><ChevronLeft className="w-5 h-5 text-gray-300 transform rotate-180" /></div>))}</div>)}
+      </div>
+    </div>
+  );
+}
+
+function ShoppingList({ items, onToggle, onDelete, onAdd, onUpdateQuantity, onExport, unitOptions, addUnitOption }: any) {
+  const [newItemName, setNewItemName] = useState('');
+  const [newItemQuantity, setNewItemQuantity] = useState(1);
+  const [newItemUnit, setNewItemUnit] = useState('個');
+  const [isCustomUnit, setIsCustomUnit] = useState(false);
+  const [customUnitName, setCustomUnitName] = useState('');
+
+  const handleAdd = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newItemName.trim()) {
+      let finalUnit = newItemUnit;
+      if (isCustomUnit) { finalUnit = customUnitName; addUnitOption(customUnitName); }
+      onAdd(newItemName.trim(), newItemQuantity, finalUnit);
+      setNewItemName(''); setNewItemQuantity(1);
+      if (isCustomUnit) { setNewItemUnit(customUnitName); setIsCustomUnit(false); setCustomUnitName(''); }
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+        <div className="flex justify-between items-center mb-4"><h3 className="font-bold text-lg flex items-center gap-2"><ShoppingCart className="w-5 h-5 text-blue-600" />買い物リスト</h3><button onClick={onExport} className="text-blue-600 text-sm font-bold flex items-center gap-1 hover:bg-blue-50 px-3 py-1.5 rounded-lg transition-colors"><Share2 className="w-4 h-4" /> Keepに送る</button></div>
+        <form onSubmit={handleAdd} className="mb-6">
+          <div className="flex gap-2 mb-2">
+            <input type="text" className="flex-[2] p-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-100" placeholder="商品名..." value={newItemName} onChange={(e) => setNewItemName(e.target.value)} />
+            <div className="flex flex-1 gap-1">
+              <input type="number" min="1" className="w-16 p-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-100 text-center" value={newItemQuantity} onChange={(e) => setNewItemQuantity(Number(e.target.value))} />
+              {!isCustomUnit ? (<select className="flex-1 p-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-100 text-sm" value={newItemUnit} onChange={(e) => { if (e.target.value === 'NEW_ENTRY') { setIsCustomUnit(true); setCustomUnitName(''); } else { setNewItemUnit(e.target.value); } }}>{unitOptions.map((opt: string) => (<option key={opt} value={opt}>{opt}</option>))}<option value="NEW_ENTRY" className="text-blue-600 font-bold">+ 新規追加</option></select>) : (<div className="flex-1 flex gap-1"><input type="text" className="w-full p-3 bg-white rounded-xl border-2 border-blue-500 focus:outline-none text-sm" placeholder="単位" value={customUnitName} onChange={(e) => setCustomUnitName(e.target.value)} required autoFocus /><button type="button" onClick={() => { setIsCustomUnit(false); setNewItemUnit('個'); }} className="px-2 text-gray-500 bg-gray-100 rounded-lg whitespace-nowrap text-xs">戻る</button></div>)}
+            </div>
+          </div>
+          <button type="submit" className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold shadow-md hover:bg-blue-700 transition-colors flex items-center justify-center gap-2" disabled={!newItemName.trim()}><Plus className="w-5 h-5" />リストに追加</button>
+        </form>
+        <div className="space-y-2">{items.length === 0 ? (<div className="text-center py-8 text-gray-400"><ShoppingCart className="w-12 h-12 mx-auto mb-2 opacity-20" /><p>リストは空です</p></div>) : (items.map((item: any) => (<div key={item.id} className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${item.isChecked ? 'bg-gray-50 border-gray-100 opacity-60' : 'bg-white border-gray-200 hover:shadow-sm'}`}><button onClick={() => onToggle(item.id)} className={`flex-shrink-0 transition-colors ${item.isChecked ? 'text-green-500' : 'text-gray-300 hover:text-green-500'}`}>{item.isChecked ? <CheckSquare className="w-6 h-6" /> : <Square className="w-6 h-6" />}</button><div className="flex-1 min-w-0"><span className={`block font-bold truncate ${item.isChecked ? 'line-through text-gray-400' : 'text-gray-800'}`}>{item.name}</span><span className="text-xs text-gray-500">{formatAmountStr(item.quantity, item.unit)}</span></div><div className="flex items-center gap-1 bg-gray-50 rounded-lg p-1"><button onClick={() => onUpdateQuantity(item.id, -1)} className="p-1 hover:bg-white rounded shadow-sm text-gray-500 disabled:opacity-30" disabled={item.quantity <= 1}><Minus className="w-3 h-3" /></button><button onClick={() => onUpdateQuantity(item.id, 1)} className="p-1 hover:bg-white rounded shadow-sm text-gray-500"><Plus className="w-3 h-3" /></button></div><button onClick={() => onDelete(item.id)} className="p-2 text-gray-400 hover:bg-red-50 hover:text-red-500 rounded-full transition-colors"><Trash2 className="w-4 h-4" /></button></div>)))}</div>
+      </div>
     </div>
   );
 }
