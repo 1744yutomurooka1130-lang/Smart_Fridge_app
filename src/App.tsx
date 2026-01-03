@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Check, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles } from 'lucide-react';
+import React, { useState, useEffect, useMemo, ChangeEvent } from 'react';
+import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Check, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles, Scan } from 'lucide-react';
 
 // --- 型定義 ---
 type StorageType = 'refrigerator' | 'freezer_main' | 'freezer_sub' | 'vegetable' | 'ambient';
@@ -11,7 +11,8 @@ interface RecipeMaterial { name: string; amount: number | string; unit: string; 
 interface Recipe { id: string; title: string; time: string; ingredients: RecipeMaterial[]; missing: RecipeMaterial[]; desc: string; mode: 'auto' | 'custom'; createdAt: string; userRequest?: string; allMaterials: RecipeMaterial[]; }
 
 // --- 定数 ---
-const GEMINI_MODEL = "gemini-2.0-flash-exp";
+// 安定稼働のため gemini-2.5-flash を使用
+const GEMINI_MODEL = "gemini-2.5-flash"; 
 
 // --- ヘルパー関数 ---
 const formatAmountStr = (amount: number | string, unit: string) => { const nonNumericUnits = ['少々', '適量', 'お好みで', 'ひとつまみ', '適宜']; return nonNumericUnits.includes(unit) ? unit : `${amount}${unit}`; };
@@ -22,6 +23,16 @@ const fileToBase64 = (file: File): Promise<string> => {
     reader.onload = () => { const result = reader.result as string; resolve(result.split(',')[1]); };
     reader.onerror = error => reject(error);
   });
+};
+// ローカルストレージ読み込みヘルパー
+const loadFromStorage = <T,>(key: string, initialValue: T): T => {
+  try {
+    const item = window.localStorage.getItem(key);
+    return item ? JSON.parse(item) : initialValue;
+  } catch (error) {
+    console.error(error);
+    return initialValue;
+  }
 };
 
 // --- 初期データ（圧縮） ---
@@ -51,20 +62,36 @@ const DEFAULT_STOCK_THRESHOLDS: Record<string, number> = { '卵': 3, '牛乳': 1
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'inventory' | 'add' | 'recipes' | 'shopping' | 'settings'>('dashboard');
-  const [items, setItems] = useState<FoodItem[]>(INITIAL_ITEMS);
-  const [shoppingList, setShoppingList] = useState<ShoppingItem[]>(INITIAL_SHOPPING_LIST);
-  const [recipeHistory, setRecipeHistory] = useState<Recipe[]>([]); 
+  
+  // データの永続化設定
+  const [items, setItems] = useState<FoodItem[]>(() => loadFromStorage('sf_items', INITIAL_ITEMS));
+  const [shoppingList, setShoppingList] = useState<ShoppingItem[]>(() => loadFromStorage('sf_shoppingList', INITIAL_SHOPPING_LIST));
+  const [recipeHistory, setRecipeHistory] = useState<Recipe[]>(() => loadFromStorage('sf_recipeHistory', []));
   const [geminiApiKey, setGeminiApiKey] = useState<string>(''); 
-  const [categoryOptions, setCategoryOptions] = useState(INITIAL_CATEGORY_OPTIONS); 
-  const [locationOptions, setLocationOptions] = useState(INITIAL_LOCATION_OPTIONS); 
-  const [unitOptions, setUnitOptions] = useState<string[]>(INITIAL_UNIT_OPTIONS);
-  const [expirySettings, setExpirySettings] = useState<Record<string, number>>(DEFAULT_EXPIRY_DAYS);
-  const [stockThresholds, setStockThresholds] = useState<Record<string, number>>(DEFAULT_STOCK_THRESHOLDS); 
+  const [categoryOptions, setCategoryOptions] = useState(() => loadFromStorage('sf_categoryOptions', INITIAL_CATEGORY_OPTIONS));
+  const [locationOptions, setLocationOptions] = useState(() => loadFromStorage('sf_locationOptions', INITIAL_LOCATION_OPTIONS));
+  const [unitOptions, setUnitOptions] = useState<string[]>(() => loadFromStorage('sf_unitOptions', INITIAL_UNIT_OPTIONS));
+  const [expirySettings, setExpirySettings] = useState<Record<string, number>>(() => loadFromStorage('sf_expirySettings', DEFAULT_EXPIRY_DAYS));
+  const [stockThresholds, setStockThresholds] = useState<Record<string, number>>(() => loadFromStorage('sf_stockThresholds', DEFAULT_STOCK_THRESHOLDS));
   const [emojiHistory, setEmojiHistory] = useState<Record<string, string>>(() => {
+    const saved = window.localStorage.getItem('sf_emojiHistory');
+    if (saved) return JSON.parse(saved);
     const history: Record<string, string> = {};
     INITIAL_ITEMS.forEach(item => { history[item.categorySmall] = item.emoji; });
     return history;
   });
+
+  // 保存用Effect
+  useEffect(() => { localStorage.setItem('sf_items', JSON.stringify(items)); }, [items]);
+  useEffect(() => { localStorage.setItem('sf_shoppingList', JSON.stringify(shoppingList)); }, [shoppingList]);
+  useEffect(() => { localStorage.setItem('sf_recipeHistory', JSON.stringify(recipeHistory)); }, [recipeHistory]);
+  useEffect(() => { localStorage.setItem('sf_categoryOptions', JSON.stringify(categoryOptions)); }, [categoryOptions]);
+  useEffect(() => { localStorage.setItem('sf_locationOptions', JSON.stringify(locationOptions)); }, [locationOptions]);
+  useEffect(() => { localStorage.setItem('sf_unitOptions', JSON.stringify(unitOptions)); }, [unitOptions]);
+  useEffect(() => { localStorage.setItem('sf_expirySettings', JSON.stringify(expirySettings)); }, [expirySettings]);
+  useEffect(() => { localStorage.setItem('sf_stockThresholds', JSON.stringify(stockThresholds)); }, [stockThresholds]);
+  useEffect(() => { localStorage.setItem('sf_emojiHistory', JSON.stringify(emojiHistory)); }, [emojiHistory]);
+
   const [inventoryFilterMode, setInventoryFilterMode] = useState<FilterMode>('all');
   const [showScannerModal, setShowScannerModal] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
@@ -203,6 +230,8 @@ export default function App() {
     </div>
   );
 }
+
+// --- Subcomponents ---
 
 function Navigation({ activeTab, setActiveTab, counts }: any) {
   const tabs = [
@@ -595,7 +624,7 @@ function RecipeGenerator({ items, onAddToShoppingList, history, onAddHistory, ap
       setSelectedRecipe(newRecipe);
     } catch (error) {
       console.error("Gemini API Error:", error);
-      alert("レシピの生成に失敗しました。APIキーを確認するか、しばらく待ってから試してください。");
+      alert("レシピの生成に失敗しました。");
     } finally {
       setLoading(false);
     }
@@ -699,6 +728,7 @@ function ScannerModal({ onClose, onScan, apiKey, categoryOptions, addCategoryOpt
 
       try {
         const base64Image = await fileToBase64(imageFile);
+        const GEMINI_MODEL = "gemini-2.0-flash-exp"; // 最新モデル
         const prompt = `このレシート画像を解析し、購入された食品アイテムのリストを作成してください。以下のJSON形式のみを出力してください。賞味期限は、もしレシートに日付があればそこから適切に推測するか、食品の一般的な日持ちを考慮して今日からの日付（YYYY-MM-DD）を設定してください。\n\n{\n  "items": [\n    {\n      "name": "食品名",\n      "quantity": 数値（個数など）,\n      "unit": "単位（個、本、パックなど）",\n      "expiryDate": "YYYY-MM-DD",\n      "category": "dairy" | "egg" | "vegetable" | "fruit" | "meat" | "fish" | "other",\n      "emoji": "絵文字"\n    }\n  ]\n}`;
 
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`, {
