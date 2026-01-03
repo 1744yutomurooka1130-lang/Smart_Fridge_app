@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Check, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles, Upload } from 'lucide-react';
+import React, { useState, useEffect, useMemo, ChangeEvent } from 'react';
+import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Check, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles, Scan } from 'lucide-react';
 import Tesseract from 'tesseract.js';
 
 // --- 型定義 ---
@@ -655,7 +655,7 @@ function ShoppingList({ items, onToggle, onDelete, onAdd, onUpdateQuantity, onEx
   );
 }
 
-function ScannerModal({ onClose, onScan, categoryOptions, addCategoryOption, expirySettings, locationOptions, addLocationOption, emojiHistory }: any) {
+function ScannerModal({ onClose, onScan, categoryOptions, addCategoryOption, locationOptions, addLocationOption, emojiHistory, expirySettings }: any) {
   const [scanning, setScanning] = useState(false);
   const [ocrText, setOcrText] = useState('');
   const [ocrProgress, setOcrProgress] = useState(0);
@@ -671,46 +671,23 @@ function ScannerModal({ onClose, onScan, categoryOptions, addCategoryOption, exp
       try {
         const result = await Tesseract.recognize(imageFile, 'jpn', { logger: m => { if (m.status === 'recognizing text') setOcrProgress(Math.floor(m.progress * 100)); } });
         setOcrText(result.data.text);
-      } catch (err) { console.error(err); setOcrText('読み取りに失敗しました。'); } finally { setScanning(false); }
+      } catch (err: any) { console.error(err); setOcrText('読み取りに失敗しました。'); } finally { setScanning(false); }
     }
   };
 
   const handleOcrComplete = () => {
     const lines = ocrText.split('\n').filter(line => line.trim() !== '');
     const scannedItems: FoodItem[] = lines.slice(0, Math.min(lines.length, 5)).map((line, index) => {
-      // 既存の設定（カテゴリーや期限）を活用するロジック
-      let category: ItemCategory = 'other';
       let emoji = '📦';
+      const EMOJI_KEYWORDS: Record<string, string> = { '牛': '🥩', '豚': '🥩', '鶏': '🍗', '肉': '🥩', 'ハム': '🥩', '魚': '🐟', '鮭': '🐟', '鯖': '🐟', '鯵': '🐟', '鰯': '🐟', '鮪': '🐟', '刺身': '🐟', 'エビ': '🦐', 'カニ': '🦀', '牛乳': '🥛', 'ヨーグルト': '🥣', 'チーズ': '🧀', '卵': '🥚', 'キャベツ': '🥬', 'レタス': '🥬', '白菜': '🥬', 'トマト': '🍅', 'きゅうり': '🥒', 'ブロッコリー': '🥦', '人参': '🥕', '大根': '🥢', '玉ねぎ': '🧅', 'きのこ': '🍄', 'りんご': '🍎', 'みかん': '🍊', 'バナナ': '🍌', 'パン': '🍞', 'うどん': '🍜', 'カレー': '🍛', 'アイス': '🍨', 'チョコ': '🍫', '酒': '🍶', 'ビール': '🍺', 'ジュース': '🧃', '豆腐': '🧊', '納豆': '🥢' };
+      for (const [key, val] of Object.entries(EMOJI_KEYWORDS)) { if (line.includes(key)) { emoji = val; break; } }
       let expiryDate = '';
+      if (expirySettings[line]) { const d = new Date(); d.setDate(d.getDate() + expirySettings[line]); expiryDate = d.toISOString().split('T')[0]; }
       
-      // 簡易的なキーワードマッチングでカテゴリと絵文字を推測
-      for (const [key, val] of Object.entries(EMOJI_KEYWORDS)) {
-        if (line.includes(key)) { emoji = val; break; }
-      }
-      
-      // 賞味期限の自動設定
-      if (expirySettings[line]) {
-         const d = new Date();
-         d.setDate(d.getDate() + expirySettings[line]);
-         expiryDate = d.toISOString().split('T')[0];
-      }
-
-      return {
-        id: Date.now().toString() + index,
-        name: line.substring(0, 15), 
-        storage: 'refrigerator',
-        category: category,
-        categorySmall: line.substring(0, 15),
-        location: '未設定',
-        expiryDate: expiryDate,
-        quantity: 1,
-        unit: '個',
-        addedDate: new Date().toISOString().split('T')[0],
-        emoji: emoji
-      };
+      const item: FoodItem = { id: Date.now().toString() + index, name: line.substring(0, 15), storage: 'refrigerator', category: 'other', categorySmall: line.substring(0, 15), location: '未設定', expiryDate: expiryDate, quantity: 1, unit: '個', addedDate: new Date().toISOString().split('T')[0], emoji: emoji };
+      return item;
     });
 
-    // 新しいカテゴリ候補があれば追加（未使用変数エラー回避のため使用）
     scannedItems.forEach(item => {
        const opts = categoryOptions[item.category] || [];
        if (!opts.includes(item.categorySmall)) addCategoryOption(item.category, item.categorySmall);
