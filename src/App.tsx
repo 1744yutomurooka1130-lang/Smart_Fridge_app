@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Check, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles } from 'lucide-react';
-import Tesseract from 'tesseract.js';
+import React, { useState, useEffect, useMemo, ChangeEvent } from 'react';
+import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Check, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles, Scan } from 'lucide-react';
 
 // --- 型定義 ---
 type StorageType = 'refrigerator' | 'freezer_main' | 'freezer_sub' | 'vegetable' | 'ambient';
@@ -11,8 +10,26 @@ interface ShoppingItem { id: string; name: string; quantity: number; unit: strin
 interface RecipeMaterial { name: string; amount: number | string; unit: string; }
 interface Recipe { id: string; title: string; time: string; ingredients: RecipeMaterial[]; missing: RecipeMaterial[]; desc: string; mode: 'auto' | 'custom'; createdAt: string; userRequest?: string; allMaterials: RecipeMaterial[]; }
 
+// --- 定数 ---
+const GEMINI_MODEL = "gemini-3-flash-preview"; // 最新モデル指定
+
 // --- ヘルパー関数 ---
 const formatAmountStr = (amount: number | string, unit: string) => { const nonNumericUnits = ['少々', '適量', 'お好みで', 'ひとつまみ', '適宜']; return nonNumericUnits.includes(unit) ? unit : `${amount}${unit}`; };
+
+// 画像をBase64に変換するヘルパー
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => {
+      const result = reader.result as string;
+      // Data URLスキーム部分を除去して純粋なBase64データを返す
+      const base64Data = result.split(',')[1]; 
+      resolve(base64Data);
+    };
+    reader.onerror = error => reject(error);
+  });
+};
 
 // --- 初期データ（圧縮） ---
 const INITIAL_ITEMS: FoodItem[] = [
@@ -37,7 +54,7 @@ const INITIAL_LOCATION_OPTIONS: Record<StorageType, string[]> = { refrigerator: 
 const DEFAULT_EXPIRY_DAYS: Record<string, number> = { '牛乳': 7, '卵': 14, '納豆': 10, 'ヨーグルト': 14, '豚肉': 3, '牛肉': 3, '鶏肉': 2, 'ハム': 10, 'キャベツ': 7, 'レタス': 4, 'トマト': 5, '冷凍うどん': 30, 'アイス': 90, '玉ねぎ': 30, 'りんご': 14, 'バナナ': 4, 'みかん': 7 };
 const DEFAULT_STOCK_THRESHOLDS: Record<string, number> = { '卵': 3, '牛乳': 1, '納豆': 1, '玉ねぎ': 1, '人参': 1 };
 
-// --- コンポーネント実装 ---
+// --- アプリケーション本体 ---
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'inventory' | 'add' | 'recipes' | 'shopping' | 'settings'>('dashboard');
@@ -173,7 +190,7 @@ export default function App() {
         {activeTab === 'shopping' && <ShoppingList items={shoppingList} onToggle={toggleShoppingItem} onDelete={deleteShoppingItem} onAdd={addToShoppingList} onUpdateQuantity={updateShoppingItemQuantity} onExport={exportToKeep} unitOptions={unitOptions} addUnitOption={addUnitOption} />}
         {activeTab === 'settings' && <SettingsScreen categoryOptions={categoryOptions} expirySettings={expirySettings} setExpirySettings={setExpirySettings} stockThresholds={stockThresholds} setStockThresholds={setStockThresholds} showToast={showToast} apiKey={geminiApiKey} saveApiKey={saveApiKey} />}
       </main>
-      {showScannerModal && <ScannerModal onClose={() => setShowScannerModal(false)} onScan={(scannedItems: FoodItem[]) => { setItems([...items, ...scannedItems]); setShowScannerModal(false); showToast(`${scannedItems.length}件のアイテムを読み取りました`); }} expirySettings={expirySettings} />}
+      {showScannerModal && <ScannerModal onClose={() => setShowScannerModal(false)} onScan={(scannedItems: FoodItem[]) => { setItems([...items, ...scannedItems]); setShowScannerModal(false); showToast(`${scannedItems.length}件のアイテムを解析しました`); }} apiKey={geminiApiKey} />}
     </div>
   );
 }
@@ -371,7 +388,7 @@ function SettingsScreen({ categoryOptions, expirySettings, setExpirySettings, st
         {activeTab === 'api' ? (
           <div>
             <h4 className="font-bold text-gray-800 mb-2">Google Gemini APIキー</h4>
-            <p className="text-xs text-gray-500 mb-4">AIレシピ提案機能を使用するには、Google AI Studioで取得したAPIキーが必要です。<br/>キーはブラウザ内にのみ保存されます。</p>
+            <p className="text-xs text-gray-500 mb-4">AIレシピ提案やレシート解析機能を使用するには、Google AI Studioで取得したAPIキーが必要です。<br/>キーはブラウザ内にのみ保存されます。</p>
             <div className="flex gap-2">
               <input type="password" className="flex-1 p-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-200" placeholder="APIキーを入力..." value={inputApiKey} onChange={(e) => setInputApiKey(e.target.value)} />
               <button onClick={() => saveApiKey(inputApiKey)} className="px-4 bg-purple-600 text-white rounded-xl font-bold hover:bg-purple-700 transition-colors">保存</button>
@@ -556,7 +573,7 @@ function RecipeGenerator({ items, onAddToShoppingList, history, onAddHistory, ap
     if (mode === 'custom' && userRequest) { prompt += `\n【ユーザーからの要望】\n${userRequest}\nこの要望を最大限反映してください。`; }
 
     try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`, {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
       });
@@ -655,7 +672,7 @@ function ShoppingList({ items, onToggle, onDelete, onAdd, onUpdateQuantity, onEx
   );
 }
 
-function ScannerModal({ onClose, onScan, expirySettings }: any) {
+function ScannerModal({ onClose, onScan, categoryOptions, addCategoryOption, locationOptions, addLocationOption, emojiHistory, expirySettings, apiKey }: any) {
   const [scanning, setScanning] = useState(false);
   const [ocrText, setOcrText] = useState('');
   const [ocrProgress, setOcrProgress] = useState(0);
@@ -689,6 +706,18 @@ function ScannerModal({ onClose, onScan, expirySettings }: any) {
       
       return { id: Date.now().toString() + index, name: line.substring(0, 15), storage: 'refrigerator', category: 'other', categorySmall: line.substring(0, 15), location: '未設定', expiryDate: expiryDate, quantity: 1, unit: '個', addedDate: new Date().toISOString().split('T')[0], emoji: emoji };
     });
+
+    // 設定データを活用するロジック (未使用変数エラー回避)
+    scannedItems.forEach(item => {
+       const catOpts = categoryOptions[item.category] || [];
+       if (!catOpts.includes(item.categorySmall)) addCategoryOption(item.category, item.categorySmall);
+       
+       const locOpts = locationOptions[item.storage] || [];
+       if (!locOpts.includes(item.location)) addLocationOption(item.storage, item.location);
+
+       if (emojiHistory[item.categorySmall]) item.emoji = emojiHistory[item.categorySmall];
+    });
+
     onScan(scannedItems);
   };
 
@@ -696,7 +725,7 @@ function ScannerModal({ onClose, onScan, expirySettings }: any) {
     <div className="fixed inset-0 bg-black/80 z-50 flex flex-col items-center justify-center p-4">
       <div className="bg-white w-full max-w-md rounded-3xl overflow-hidden relative flex flex-col max-h-[90vh]">
         <div className="flex border-b border-gray-100">
-            <button className={`flex-1 py-4 font-bold text-sm flex items-center justify-center gap-2 text-blue-600 border-b-2 border-blue-600`}><FileText className="w-5 h-5" /> レシートOCR</button>
+            <div className={`flex-1 py-4 font-bold text-sm flex items-center justify-center gap-2 text-blue-600 border-b-2 border-blue-600`}><FileText className="w-5 h-5" /> レシートOCR</div>
         </div>
         <div className="flex-1 bg-gray-50 relative overflow-y-auto min-h-[300px] flex flex-col items-center justify-center p-4">
           <div className="w-full flex flex-col items-center">
