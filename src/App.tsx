@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Check, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles } from 'lucide-react';
+import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles } from 'lucide-react';
 
 // --- 型定義 ---
 type StorageType = 'refrigerator'|'freezer_main'|'freezer_sub'|'vegetable'|'ambient';
@@ -14,7 +14,7 @@ interface ScannedItem extends FoodItem { isSelected: boolean; }
 // --- 定数 ---
 const GEMINI_MODEL = "gemini-3-flash-preview"; 
 
-// --- ヘルパー ---
+// --- ヘルパー関数 ---
 const formatAmountStr = (amount: number|string, unit: string) => { const u=['少々','適量','お好みで','ひとつまみ','適宜']; return u.includes(unit)?unit:`${amount}${unit}`; };
 const fileToBase64 = (file: File): Promise<string> => new Promise((resolve, reject) => { const reader = new FileReader(); reader.readAsDataURL(file); reader.onload = () => resolve((reader.result as string).split(',')[1]); reader.onerror = reject; });
 const loadFromStorage = <T,>(key: string, v: T): T => { try { const i = window.localStorage.getItem(key); return i ? JSON.parse(i) : v; } catch { return v; } };
@@ -30,11 +30,11 @@ const callGeminiWithRetry = async (apiKey: string, payload: any, retries = 3, de
   }
 };
 
-// --- データ (圧縮) ---
+// --- 初期データ（圧縮・重複排除） ---
 const INITIAL_ITEMS: FoodItem[] = [{id:'1',name:'牛乳',storage:'refrigerator',category:'dairy',categorySmall:'牛乳',location:'ドアポケット',expiryDate:new Date(Date.now()+172800000).toISOString().split('T')[0],quantity:1,unit:'本',addedDate:'2023-10-25',emoji:'🥛'},{id:'2',name:'卵',storage:'refrigerator',category:'egg',categorySmall:'卵',location:'上段',expiryDate:new Date(Date.now()+432000000).toISOString().split('T')[0],quantity:2,unit:'個',addedDate:'2023-10-20',emoji:'🥚'},{id:'3',name:'豚バラ肉',storage:'freezer_main',category:'meat',categorySmall:'豚肉',location:'上段トレー',expiryDate:new Date(Date.now()+1728000000).toISOString().split('T')[0],quantity:200,unit:'g',addedDate:'2023-10-15',emoji:'🥩'}];
 const INITIAL_SHOPPING_LIST: ShoppingItem[] = [{id:'s1',name:'醤油',quantity:1,unit:'本',isChecked:false,addedDate:'2023-10-25'}];
 const INITIAL_UNIT_OPTIONS = ['個','本','g','kg','ml','L','パック','玉','袋','束','枚','切れ','缶','瓶','箱','少々','適量'];
-const EMOJI_KEYWORDS: Record<string, string> = { '牛':'🥩','豚':'🥩','鶏':'🍗','肉':'🥩','魚':'🐟','鮭':'🐟','鯖':'🐟','海老':'🦐','牛乳':'🥛','卵':'🥚','キャベツ':'🥬','レタス':'🥬','トマト':'🍅','人参':'🥕','玉ねぎ':'🧅','りんご':'🍎','みかん':'🍊','バナナ':'🍌','パン':'🍞','うどん':'🍜','カレー':'🍛','アイス':'🍨','チョコ':'🍫','酒':'🍶','ビール':'🍺','豆腐':'🧊','納豆':'🥢' };
+const EMOJI_KEYWORDS: Record<string, string> = { '牛':'🥩','豚':'🥩','鶏':'🍗','肉':'🥩','ハム':'🥩','魚':'🐟','鮭':'🐟','鯖':'🐟','海老':'🦐','牛乳':'🥛','卵':'🥚','キャベツ':'🥬','レタス':'🥬','トマト':'🍅','人参':'🥕','玉ねぎ':'🧅','りんご':'🍎','みかん':'🍊','バナナ':'🍌','パン':'🍞','うどん':'🍜','カレー':'🍛','アイス':'🍨','チョコ':'🍫','酒':'🍶','ビール':'🍺','豆腐':'🧊','納豆':'🥢' };
 const EMOJI_LIBRARY: Record<string, string[]> = { '野菜・果物': ['🥦','🥬','🥒','🌽','🥕','🥔','🍅','🍆','🧅','🍎','🍊','🍌','🍇','🍓','🍑','🍍','🥝'], '肉・魚・卵': ['🥩','🍗','🥓','🍖','🍔','🐟','🐠','🦐','🦀','🦑','🍣','🥚','🍳'], '乳製品・飲料': ['🥛','🧀','🧈','🍦','🍵','☕','🧃','🥤','🍺','🍷'], '穀物・麺類': ['🍚','🍙','🍜','🍝','🍞','🥐','🥪','🍕'], 'その他': ['🍱','🥫','🥢','🍫','🍬','🍮','🧂','🥡'] };
 const CATEGORY_LABELS: Record<string, string> = { dairy:'🥛 乳製品', egg:'🥚 卵', meat:'🥩 肉類', fish:'🐟 魚介', vegetable:'🥦 野菜', fruit:'🍎 果物', other:'🥫 その他' };
 const INITIAL_CATEGORY_OPTIONS: Record<ItemCategory, string[]> = { dairy:['牛乳','ヨーグルト','チーズ'], egg:['卵'], meat:['豚肉','牛肉','鶏肉','ハム'], fish:['鮭','サバ'], vegetable:['キャベツ','人参','玉ねぎ','トマト'], fruit:['りんご','バナナ','みかん'], other:['豆腐','納豆'] };
@@ -45,6 +45,8 @@ const DEFAULT_STOCK_THRESHOLDS: Record<string, number> = { '卵':3, '牛乳':1, 
 // --- アプリ本体 ---
 export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard'|'inventory'|'add'|'recipes'|'shopping'|'settings'>('dashboard');
+  
+  // データの永続化
   const [items, setItems] = useState<FoodItem[]>(() => loadFromStorage('sf_items', INITIAL_ITEMS));
   const [shoppingList, setShoppingList] = useState<ShoppingItem[]>(() => loadFromStorage('sf_shoppingList', INITIAL_SHOPPING_LIST));
   const [recipeHistory, setRecipeHistory] = useState<Recipe[]>(() => loadFromStorage('sf_recipeHistory', []));
@@ -202,15 +204,7 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
        const existingNames = new Set(items.map((i: any) => i.categorySmall || i.name));
        const missingNames = lowStockItems.filter((name: string) => !existingNames.has(name));
        const missingFoodItems: FoodItem[] = missingNames.map((name: string) => {
-         let emoji='📦'; 
-         // 簡易マッチング
-         if(name.includes('牛')||name.includes('豚')||name.includes('肉')) emoji='🥩';
-         else if(name.includes('魚')||name.includes('鮭')) emoji='🐟';
-         else if(name.includes('野菜')||name.includes('キャベツ')) emoji='🥦';
-         else if(name.includes('果物')||name.includes('りんご')) emoji='🍎';
-         else if(name.includes('卵')) emoji='🥚';
-         else if(name.includes('乳')||name.includes('牛乳')) emoji='🥛';
-         
+         let emoji='📦'; for(const[k,v]of Object.entries(EMOJI_KEYWORDS)){if(name.includes(k)){emoji=v;break;}}
          return { id: `temp-${name}`, name, storage: 'ambient', category: 'other', categorySmall: name, location: '', expiryDate: '', quantity: 0, unit: '個', addedDate: '', emoji };
        });
        baseItems = [...baseItems, ...missingFoodItems];
@@ -348,7 +342,6 @@ function AddItemForm({ onAdd, onCancel, categoryOptions, addCategoryOption, expi
     const currentName = isCustomCategory ? customCategoryName : data.categorySmall;
     if (currentName) {
       if (emojiHistory[currentName]) { setData((prev: any) => ({ ...prev, emoji: emojiHistory[currentName] })); return; }
-      const EMOJI_KEYWORDS: Record<string, string> = { '牛': '🥩', '豚': '🥩', '鶏': '🍗', '肉': '🥩', '魚': '🐟', '鮭': '🐟', '鯖': '🐟', '海老': '🦐', '牛乳': '🥛', '卵': '🥚', 'キャベツ': '🥬', 'レタス': '🥬', 'トマト': '🍅', '人参': '🥕', '玉ねぎ': '🧅', 'りんご': '🍎', 'みかん': '🍊', 'バナナ': '🍌', 'パン': '🍞', 'うどん': '🍜', 'カレー': '🍛', 'アイス': '🍨', 'チョコ': '🍫', '酒': '🍶', 'ビール': '🍺', '豆腐': '🧊', '納豆': '🥢' };
       for (const [key, emoji] of Object.entries(EMOJI_KEYWORDS)) { if (currentName.includes(key)) { setData((prev: any) => ({ ...prev, emoji: emoji })); break; } }
     } else if (data.category) {
       let defaultEmoji = '📦';
