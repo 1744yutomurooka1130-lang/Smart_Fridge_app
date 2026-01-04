@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Check, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles, Scan } from 'lucide-react';
+import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Check, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles } from 'lucide-react';
 
 // --- 型定義 ---
 type StorageType = 'refrigerator' | 'freezer_main' | 'freezer_sub' | 'vegetable' | 'ambient';
@@ -11,8 +11,8 @@ interface RecipeMaterial { name: string; amount: number | string; unit: string; 
 interface Recipe { id: string; title: string; time: string; ingredients: RecipeMaterial[]; missing: RecipeMaterial[]; desc: string; mode: 'auto' | 'custom'; createdAt: string; userRequest?: string; allMaterials: RecipeMaterial[]; }
 
 // --- 定数 ---
-// 安定稼働のため gemini-1.5-flash を採
-const GEMINI_MODEL = "gemini-1.5-flash"; 
+// 最新のFlashモデル（利用不可の場合は "gemini-1.5-flash" に戻してください）
+const GEMINI_MODEL = "gemini-2.0-flash-exp";
 
 // --- ヘルパー関数 ---
 const formatAmountStr = (amount: number | string, unit: string) => { const nonNumericUnits = ['少々', '適量', 'お好みで', 'ひとつまみ', '適宜']; return nonNumericUnits.includes(unit) ? unit : `${amount}${unit}`; };
@@ -41,19 +41,12 @@ const callGeminiWithRetry = async (apiKey: string, payload: any, retries = 3, de
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-
-      if (response.ok) {
-        return await response.json();
-      }
-
-      // 429 (Too Many Requests) または 503 (Service Unavailable) の場合
+      if (response.ok) return await response.json();
       if ((response.status === 429 || response.status === 503) && i < retries) {
         console.warn(`API Error ${response.status}. Retrying in ${delay}ms...`);
         await new Promise(resolve => setTimeout(resolve, delay));
-        delay *= 2; // 待機時間を倍にする
-        continue;
+        delay *= 2; continue;
       }
-
       throw new Error(`Gemini API Error: ${response.status} ${response.statusText}`);
     } catch (error) {
       if (i === retries) throw error;
@@ -284,7 +277,6 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
        const missingFoodItems: FoodItem[] = missingNames.map((name: string) => {
          let determinedEmoji = '📦';
          let determinedCategory: ItemCategory = 'other';
-         const EMOJI_KEYWORDS: Record<string, string> = { '牛': '🥩', '豚': '🥩', '鶏': '🍗', '肉': '🥩', '魚': '🐟', '野菜': '🥦', '果物': '🍎' };
          for (const [key, emoji] of Object.entries(EMOJI_KEYWORDS)) { if (name.includes(key)) { determinedEmoji = emoji; break; } }
          return { id: `temp-${name}`, name: name, storage: 'ambient', category: determinedCategory, categorySmall: name, location: '', expiryDate: '', quantity: 0, unit: '個', addedDate: '', emoji: determinedEmoji };
        });
@@ -540,8 +532,8 @@ function RecipeGenerator({ items, onAddToShoppingList, history, onAddHistory, ap
   const [userRequest, setUserRequest] = useState('');
   const [selectedRecipe, setSelectedRecipe] = useState<any>(null);
 
-  // APIリトライ関数
-  const callGeminiWithRetry = async (payload: any, retries = 3, delay = 2000): Promise<any> => {
+  // APIリトライ用共通関数（指数バックオフ）
+  const callGeminiWithRetry = async (apiKey: string, payload: any, retries = 3, delay = 2000): Promise<any> => {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
     for (let i = 0; i <= retries; i++) {
       try {
@@ -554,12 +546,12 @@ function RecipeGenerator({ items, onAddToShoppingList, history, onAddHistory, ap
         if ((response.status === 429 || response.status === 503) && i < retries) {
           console.warn(`API Error ${response.status}. Retrying in ${delay}ms...`);
           await new Promise(resolve => setTimeout(resolve, delay));
-          delay *= 2;
-          continue;
+          delay *= 2; continue;
         }
-        throw new Error(`Gemini API Error: ${response.status}`);
+        throw new Error(`Gemini API Error: ${response.status} ${response.statusText}`);
       } catch (error) {
         if (i === retries) throw error;
+        console.warn(`Network Error. Retrying in ${delay}ms...`);
         await new Promise(resolve => setTimeout(resolve, delay));
         delay *= 2;
       }
@@ -571,12 +563,11 @@ function RecipeGenerator({ items, onAddToShoppingList, history, onAddHistory, ap
     if (!apiKey) { alert("APIキーが設定されていません。設定画面でキーを入力してください。"); setLoading(false); return; }
     
     const inventoryList = items.map((i: any) => `${i.name} (${i.quantity}${i.unit})`).join(', ');
-    
     let prompt = `あなたはプロのシェフです。以下の食材リストにあるものを使って、家庭で作れる美味しいレシピを1つ提案してください。\n\n【食材リスト】\n${inventoryList}\n\n【条件】\n- 可能な限りリストにある食材を使用してください。\n- 足りない調味料や食材があれば「不足している材料」として挙げてくだい。\n- 出力は以下のJSON形式のみで行ってください。余計な説明は不要です。\n\n【JSON形式】\n{\n  "title": "料理名",\n  "time": "調理時間（例：20分）",\n  "desc": "料理の簡単な説明と魅力（100文字程度）",\n  "ingredients": [\n    {"name": "食材名", "amount": "分量", "unit": "単位"} \n  ],\n  "missing": [\n     {"name": "不足食材名", "amount": "分量", "unit": "単位"}\n  ]\n}`;
     if (mode === 'custom' && userRequest) { prompt += `\n【ユーザーからの要望】\n${userRequest}\nこの要望を最大限反映してください。`; }
 
     try {
-      const data = await callGeminiWithRetry({ contents: [{ parts: [{ text: prompt }] }] });
+      const data = await callGeminiWithRetry(apiKey, { contents: [{ parts: [{ text: prompt }] }] });
       const text = data.candidates[0].content.parts[0].text;
       const jsonStr = text.match(/\{[\s\S]*\}/)[0];
       const recipeData = JSON.parse(jsonStr);
@@ -675,7 +666,7 @@ function ScannerModal({ onClose, onScan, apiKey, categoryOptions, addCategoryOpt
   const [scanning, setScanning] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
 
-  // APIリトライ用関数
+  // APIリトライ用共通関数（指数バックオフ）をここでも使用
   const callGeminiWithRetry = async (payload: any, retries = 3, delay = 2000): Promise<any> => {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
     for (let i = 0; i <= retries; i++) {
@@ -691,9 +682,10 @@ function ScannerModal({ onClose, onScan, apiKey, categoryOptions, addCategoryOpt
           await new Promise(resolve => setTimeout(resolve, delay));
           delay *= 2; continue;
         }
-        throw new Error(`Gemini API Error: ${response.status}`);
+        throw new Error(`Gemini API Error: ${response.status} ${response.statusText}`);
       } catch (error) {
         if (i === retries) throw error;
+        console.warn(`Network Error. Retrying in ${delay}ms...`);
         await new Promise(resolve => setTimeout(resolve, delay));
         delay *= 2;
       }
