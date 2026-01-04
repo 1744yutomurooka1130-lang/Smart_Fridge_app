@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo, ChangeEvent } from 'react';
-import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Check, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles } from 'lucide-react';
 
 // --- 型定義 ---
 type StorageType = 'refrigerator' | 'freezer_main' | 'freezer_sub' | 'vegetable' | 'ambient';
@@ -9,7 +9,6 @@ interface FoodItem { id: string; name: string; storage: StorageType; category: I
 interface ShoppingItem { id: string; name: string; quantity: number; unit: string; isChecked: boolean; addedDate: string; }
 interface RecipeMaterial { name: string; amount: number | string; unit: string; }
 interface Recipe { id: string; title: string; time: string; ingredients: RecipeMaterial[]; missing: RecipeMaterial[]; desc: string; steps: string[]; mode: 'auto' | 'custom'; createdAt: string; userRequest?: string; allMaterials: RecipeMaterial[]; }
-// スキャン結果確認用の一時アイテム型
 interface ScannedItem extends FoodItem { isSelected: boolean; }
 
 // --- 定数 ---
@@ -43,7 +42,7 @@ const INITIAL_LOCATION_OPTIONS: Record<StorageType, string[]> = { refrigerator: 
 const DEFAULT_EXPIRY_DAYS: Record<string, number> = { '牛乳':7, '卵':14, '納豆':10, '豚肉':3, '牛肉':3, '鶏肉':2, 'キャベツ':7, 'レタス':4, 'トマト':5, '玉ねぎ':30, 'りんご':14 };
 const DEFAULT_STOCK_THRESHOLDS: Record<string, number> = { '卵':3, '牛乳':1, '納豆':1 };
 
-// --- アプリケーション本体 ---
+// --- コンポーネント実装 ---
 export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard'|'inventory'|'add'|'recipes'|'shopping'|'settings'>('dashboard');
   
