@@ -11,7 +11,7 @@ interface RecipeMaterial { name: string; amount: number | string; unit: string; 
 interface Recipe { id: string; title: string; time: string; ingredients: RecipeMaterial[]; missing: RecipeMaterial[]; desc: string; mode: 'auto' | 'custom'; createdAt: string; userRequest?: string; allMaterials: RecipeMaterial[]; }
 
 // --- 定数 ---
-// 安定稼働のため gemini-1.5-flash を採用
+// 安定稼働のため gemini-1.5-flash を採
 const GEMINI_MODEL = "gemini-1.5-flash"; 
 
 // --- ヘルパー関数 ---
