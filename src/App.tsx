@@ -24,15 +24,15 @@ const callGeminiWithRetry = async (apiKey: string, payload: any, retries = 3, de
     try {
       const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       if (res.ok) return await res.json();
-      if ((res.status===429 || res.status===503) && i<retries) { await new Promise(r => setTimeout(r, delay)); delay *= 2; continue; }
+      if ((res.status === 429 || res.status === 503) && i < retries) { await new Promise(r => setTimeout(r, delay)); delay *= 2; continue; }
       throw new Error(`Gemini API Error: ${res.status}`);
     } catch (e) { if (i===retries) throw e; await new Promise(r => setTimeout(r, delay)); delay *= 2; }
   }
 };
 
-// --- データ (圧縮) ---
-const INITIAL_ITEMS: FoodItem[] = [{id:'1',name:'牛乳',storage:'refrigerator',category:'dairy',categorySmall:'牛乳',location:'ドアポケット',expiryDate:new Date(Date.now()+172800000).toISOString().split('T')[0],quantity:1,unit:'本',addedDate:'2023-10-25',emoji:'🥛'},{id:'2',name:'卵',storage:'refrigerator',category:'egg',categorySmall:'卵',location:'上段',expiryDate:new Date(Date.now()+432000000).toISOString().split('T')[0],quantity:2,unit:'個',addedDate:'2023-10-20',emoji:'🥚'},{id:'3',name:'豚バラ肉',storage:'freezer_main',category:'meat',categorySmall:'豚肉',location:'上段トレー',expiryDate:new Date(Date.now()+1728000000).toISOString().split('T')[0],quantity:200,unit:'g',addedDate:'2023-10-15',emoji:'🥩'}];
-const INITIAL_SHOPPING_LIST: ShoppingItem[] = [{id:'s1',name:'醤油',quantity:1,unit:'本',isChecked:false,addedDate:'2023-10-25'}];
+// --- 初期データ（圧縮） ---
+const INITIAL_ITEMS: FoodItem[] = [{ id: '1', name: '牛乳', storage: 'refrigerator', category: 'dairy', categorySmall: '牛乳', location: 'ドアポケット', expiryDate: new Date(Date.now() + 172800000).toISOString().split('T')[0], quantity: 1, unit: '本', addedDate: '2023-10-25', emoji: '🥛' }];
+const INITIAL_SHOPPING_LIST: ShoppingItem[] = [{ id: 's1', name: '醤油', quantity: 1, unit: '本', isChecked: false, addedDate: '2023-10-25' }];
 const INITIAL_UNIT_OPTIONS = ['個','本','g','kg','ml','L','パック','玉','袋','束','枚','切れ','缶','瓶','箱','少々','適量'];
 const EMOJI_KEYWORDS: Record<string, string> = { '牛':'🥩','豚':'🥩','鶏':'🍗','肉':'🥩','魚':'🐟','鮭':'🐟','鯖':'🐟','海老':'🦐','牛乳':'🥛','卵':'🥚','キャベツ':'🥬','レタス':'🥬','トマト':'🍅','人参':'🥕','玉ねぎ':'🧅','りんご':'🍎','みかん':'🍊','バナナ':'🍌','パン':'🍞','うどん':'🍜','カレー':'🍛','アイス':'🍨','チョコ':'🍫','酒':'🍶','ビール':'🍺','豆腐':'🧊','納豆':'🥢' };
 const EMOJI_LIBRARY: Record<string, string[]> = { '野菜・果物': ['🥦','🥬','🥒','🌽','🥕','🥔','🍅','🍆','🧅','🍎','🍊','🍌','🍇','🍓','🍑','🍍','🥝'], '肉・魚・卵': ['🥩','🍗','🥓','🍖','🍔','🐟','🐠','🦐','🦀','🦑','🍣','🥚','🍳'], '乳製品・飲料': ['🥛','🧀','🧈','🍦','🍵','☕','🧃','🥤','🍺','🍷'], '穀物・麺類': ['🍚','🍙','🍜','🍝','🍞','🥐','🥪','🍕'], 'その他': ['🍱','🥫','🥢','🍫','🍬','🍮','🧂','🥡'] };
@@ -98,9 +98,26 @@ export default function App() {
   const toggleShoppingItem = (id: string) => { setShoppingList(prev => prev.map(item => item.id === id ? { ...item, isChecked: !item.isChecked } : item)); };
   const deleteShoppingItem = (id: string) => { setShoppingList(prev => prev.filter(item => item.id !== id)); };
   const updateShoppingItemQuantity = (id: string, delta: number) => { setShoppingList(prev => prev.map(item => item.id === id ? { ...item, quantity: Math.max(1, item.quantity + delta) } : item)); };
-  const lowStockItems = useMemo(() => { const g: Record<string, number> = {}; items.forEach(i => { const k = i.categorySmall || i.name; g[k] = (g[k] || 0) + i.quantity; }); const l: string[] = []; Object.keys(stockThresholds).forEach(k => { if ((g[k] || 0) < stockThresholds[k]) l.push(k); }); return l; }, [items, stockThresholds]);
-  const statusCounts = useMemo(() => { const today = new Date().toISOString().split('T')[0]; const d3 = new Date(Date.now() + 259200000).toISOString().split('T')[0]; let e=0, w=0; items.forEach(i => { if (i.expiryDate < today) e++; else if (i.expiryDate <= d3) w++; }); return { expired: e, warning: w, total: items.length, lowStock: lowStockItems.length }; }, [items, lowStockItems]);
+
+  const lowStockItems = useMemo(() => {
+    const groupedStock: Record<string, number> = {};
+    items.forEach(i => { const k = i.categorySmall || i.name; groupedStock[k] = (groupedStock[k] || 0) + i.quantity; });
+    const lowStockList: string[] = [];
+    Object.keys(stockThresholds).forEach(k => { if ((groupedStock[k] || 0) < stockThresholds[k]) lowStockList.push(k); });
+    return lowStockList;
+  }, [items, stockThresholds]);
+
+  const statusCounts = useMemo(() => {
+    const today = new Date().toISOString().split('T')[0];
+    const threeDaysLater = new Date(Date.now() + 259200000).toISOString().split('T')[0];
+    let expired = 0, warning = 0;
+    items.forEach(i => { if (i.expiryDate < today) expired++; else if (i.expiryDate <= threeDaysLater) warning++; });
+    return { expired, warning, total: items.length, lowStock: lowStockItems.length };
+  }, [items, lowStockItems]);
+
   const deleteItem = (id: string) => { setItems(items.filter(i => i.id !== id)); showToast('商品を削除しました'); };
+  
+  // exportToKeep をここで使用するために定義
   const exportToKeep = () => { console.log(shoppingList.filter(i => !i.isChecked).map(i => `・${i.name} ${formatAmountStr(i.quantity, i.unit)}`).join('\n')); showToast('Google Keepのリストに追加しました (Demo)'); };
 
   const updateItem = (updatedItem: FoodItem) => {
@@ -118,7 +135,7 @@ export default function App() {
         {activeTab==='inventory'&&<InventoryList items={items} deleteItem={deleteItem} onAddToShoppingList={addToShoppingList} lowStockItems={lowStockItems} stockThresholds={stockThresholds} inventoryFilterMode={inventoryFilterMode} setInventoryFilterMode={setInventoryFilterMode} onEdit={setEditingItem}/>}
         {activeTab==='add'&&<AddItemForm categoryOptions={categoryOptions} addCategoryOption={addCategoryOption} locationOptions={locationOptions} addLocationOption={addLocationOption} unitOptions={unitOptions} addUnitOption={addUnitOption} expirySettings={expirySettings} emojiHistory={emojiHistory} updateEmojiHistory={updateEmojiHistory} onAdd={(n:FoodItem)=>{setItems([...items,n]);showToast('追加しました');setActiveTab('inventory');}} onCancel={()=>setActiveTab('dashboard')}/>}
         {activeTab==='recipes'&&<RecipeGenerator items={items} onAddToShoppingList={addToShoppingList} history={recipeHistory} onAddHistory={addRecipeToHistory} apiKey={geminiApiKey}/>}
-        {activeTab==='shopping'&&<ShoppingList items={shoppingList} onToggle={toggleShoppingItem} onDelete={deleteShoppingItem} onAdd={addToShoppingList} onUpdateQuantity={updateShoppingItemQuantity} onExport={()=>{console.log(shoppingList);showToast('出力しました(Demo)');}} unitOptions={unitOptions} addUnitOption={addUnitOption}/>}
+        {activeTab==='shopping'&&<ShoppingList items={shoppingList} onToggle={toggleShoppingItem} onDelete={deleteShoppingItem} onAdd={addToShoppingList} onUpdateQuantity={updateShoppingItemQuantity} onExport={exportToKeep} unitOptions={unitOptions} addUnitOption={addUnitOption}/>}
         {activeTab==='settings'&&<SettingsScreen categoryOptions={categoryOptions} expirySettings={expirySettings} setExpirySettings={setExpirySettings} stockThresholds={stockThresholds} setStockThresholds={setStockThresholds} showToast={showToast} apiKey={geminiApiKey} saveApiKey={saveApiKey}/>}
       </main>
       {showScannerModal&&<ScannerModal onClose={()=>setShowScannerModal(false)} onScan={(s:FoodItem[])=>{setItems([...items,...s]);setShowScannerModal(false);showToast(`${s.length}件追加しました`);}} apiKey={geminiApiKey} categoryOptions={categoryOptions} addCategoryOption={addCategoryOption} locationOptions={locationOptions} addLocationOption={addLocationOption} emojiHistory={emojiHistory} expirySettings={expirySettings}/>}
@@ -127,7 +144,7 @@ export default function App() {
   );
 }
 
-// --- Components ---
+// --- Subcomponents ---
 function Navigation({ activeTab, setActiveTab, counts }: any) {
   const tabs = [ { id: 'dashboard', icon: LayoutDashboard, label: 'ホーム' }, { id: 'inventory', icon: Refrigerator, label: '冷蔵庫' }, { id: 'add', icon: Plus, label: '追加', isAction: true }, { id: 'recipes', icon: ChefHat, label: 'レシピ' }, { id: 'shopping', icon: ShoppingCart, label: '買い物' }, { id: 'settings', icon: Settings, label: '設定' }];
   return (
@@ -152,10 +169,10 @@ function Dashboard({ items, counts, setActiveTab, setInventoryFilterMode }: any)
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-4 gap-3">
-        <button onClick={()=>handleCardClick('all')} className="bg-white p-2 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center justify-center py-4"><span className="text-2xl font-bold text-gray-800">{counts.total}</span><span className="text-[10px] text-gray-500 mt-1">全アイテム</span></button>
-        <button onClick={()=>handleCardClick('expired')} className="bg-red-50 p-2 rounded-2xl border border-red-100 flex flex-col items-center justify-center py-4"><span className="text-2xl font-bold text-red-600">{counts.expired}</span><span className="text-[10px] text-red-500 font-semibold">期限切れ</span></button>
-        <button onClick={()=>handleCardClick('near')} className="bg-yellow-50 p-2 rounded-2xl border border-yellow-100 flex flex-col items-center justify-center py-4"><span className="text-2xl font-bold text-yellow-600">{counts.warning}</span><span className="text-[10px] text-yellow-600 font-semibold">期限間近</span></button>
-        <button onClick={()=>handleCardClick('lowStock')} className="bg-blue-50 p-2 rounded-2xl border border-blue-100 flex flex-col items-center justify-center py-4"><span className="text-2xl font-bold text-blue-600">{counts.lowStock}</span><span className="text-[10px] text-blue-600 font-semibold">在庫不足</span></button>
+        <button onClick={()=>handleCardClick('all')} className="bg-white p-2 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center justify-center py-4 hover:bg-gray-50 transition-colors"><span className="text-2xl font-bold text-gray-800">{counts.total}</span><span className="text-[10px] text-gray-500 mt-1">全アイテム</span></button>
+        <button onClick={()=>handleCardClick('expired')} className="bg-red-50 p-2 rounded-2xl border border-red-100 flex flex-col items-center justify-center py-4 hover:bg-red-100 transition-colors"><span className="text-2xl font-bold text-red-600">{counts.expired}</span><span className="text-[10px] text-red-500 font-semibold">期限切れ</span></button>
+        <button onClick={()=>handleCardClick('near')} className="bg-yellow-50 p-2 rounded-2xl border border-yellow-100 flex flex-col items-center justify-center py-4 hover:bg-yellow-100 transition-colors"><span className="text-2xl font-bold text-yellow-600">{counts.warning}</span><span className="text-[10px] text-yellow-600 font-semibold">期限間近</span></button>
+        <button onClick={()=>handleCardClick('lowStock')} className="bg-blue-50 p-2 rounded-2xl border border-blue-100 flex flex-col items-center justify-center py-4 hover:bg-blue-100 transition-colors"><span className="text-2xl font-bold text-blue-600">{counts.lowStock}</span><span className="text-[10px] text-blue-600 font-semibold">在庫不足</span></button>
       </div>
       {counts.expired>0&&<div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-xl flex items-start gap-3"><AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5"/><div><h3 className="font-bold text-red-700">期限切れがあります</h3><button onClick={()=>handleCardClick('expired')} className="mt-1 text-sm font-semibold text-red-700 underline">確認する</button></div></div>}
       <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100"><h3 className="font-bold mb-4 flex items-center gap-2"><Calendar className="w-5 h-5 text-gray-500"/>期限カレンダー</h3><div className="flex overflow-x-auto pb-4 gap-2 no-scrollbar">{dates.map((d,i)=>{const c=items.filter((x:any)=>x.expiryDate===d.iso).length;return(<div key={d.iso} className={`flex-shrink-0 w-14 h-24 rounded-full flex flex-col items-center justify-between py-3 border ${i===0?'border-green-500 bg-green-50':'border-gray-100 bg-white'}`}><span className="text-xs text-gray-400">{d.day}</span><span className="text-lg font-bold text-gray-700">{d.date}</span><div className="h-6 flex items-center justify-center">{c>0?<div className="w-5 h-5 bg-red-100 text-red-500 rounded-full flex items-center justify-center text-[10px] font-bold">{c}</div>:<div className="w-1.5 h-1.5 rounded-full bg-gray-200"/>}</div></div>);})}</div></div>
@@ -222,7 +239,7 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
         {inventoryFilterMode==='all' && <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">{filters.map(t=><button key={t.id} onClick={()=>setFilter(t.id as any)} className={`flex items-center gap-2 px-4 py-2 rounded-full border flex-shrink-0 ${filter===t.id?'bg-gray-800 text-white':'bg-white text-gray-600'}`}><t.icon className="w-4 h-4"/>{t.label}</button>)}</div>}
         <div className="flex justify-between items-center gap-3 bg-gray-50 p-3 rounded-xl border border-gray-100">
            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer"><input type="checkbox" className="w-4 h-4 accent-green-600" checked={isGrouped} onChange={(e)=>setIsGrouped(e.target.checked)}/><span className="font-bold text-xs">カテゴリー</span></label>
-           <select className="p-2 text-sm bg-white border border-gray-200 rounded-lg text-gray-700" value={sortBy} onChange={(e)=>setSortBy(e.target.value as any)}><option value="expiry">期限順</option><option value="added">登録順</option><option value="name">名前順</option></select>
+           <div className="flex items-center gap-2"><ArrowUpDown className="w-4 h-4 text-gray-400"/><select className="p-2 text-sm bg-white border border-gray-200 rounded-lg text-gray-700" value={sortBy} onChange={(e)=>setSortBy(e.target.value as any)}><option value="expiry">期限順</option><option value="added">登録順</option><option value="name">名前順</option></select></div>
         </div>
       </div>
       <div className="space-y-6">
@@ -261,8 +278,8 @@ function SettingsScreen({ categoryOptions, expirySettings, setExpirySettings, st
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
         <h3 className="font-bold text-xl mb-4 flex items-center gap-2"><Settings className="w-6 h-6 text-gray-600"/>アプリ設定</h3>
         <div className="flex bg-gray-100 p-1 rounded-xl mb-6 overflow-x-auto"><button onClick={()=>setActiveTab('expiry')} className={`flex-1 py-2 px-2 rounded-lg text-sm font-bold whitespace-nowrap ${activeTab==='expiry'?'bg-white text-green-600 shadow-sm':'text-gray-500'}`}>賞味期限</button><button onClick={()=>setActiveTab('stock')} className={`flex-1 py-2 px-2 rounded-lg text-sm font-bold whitespace-nowrap ${activeTab==='stock'?'bg-white text-blue-600 shadow-sm':'text-gray-500'}`}>在庫アラート</button><button onClick={()=>setActiveTab('api')} className={`flex-1 py-2 px-2 rounded-lg text-sm font-bold whitespace-nowrap ${activeTab==='api'?'bg-white text-purple-600 shadow-sm':'text-gray-500'}`}>AI設定</button></div>
-        {activeTab==='api'?<div className="space-y-4"><h4 className="font-bold text-gray-800">Google Gemini APIキー</h4><input type="password" className="w-full p-3 bg-gray-50 border rounded-xl" placeholder="APIキー" value={inputApiKey} onChange={(e)=>setInputApiKey(e.target.value)}/><button onClick={()=>saveApiKey(inputApiKey)} className="w-full py-3 bg-purple-600 text-white rounded-xl font-bold">保存</button></div>:
-        <><div className="mb-6 relative"><Search className="absolute left-3 top-3 text-gray-400 w-5 h-5"/><input type="text" placeholder="食品検索..." className="w-full pl-10 pr-4 py-3 bg-gray-50 border rounded-xl" value={searchTerm} onChange={(e)=>setSearchTerm(e.target.value)}/></div><div className="space-y-6">{Object.keys(filteredCategoryOptions).map(cat=><div key={cat}><h4 className="font-bold text-gray-800 mb-2">{CATEGORY_LABELS[cat]||cat}</h4><div className="grid grid-cols-2 gap-4">{filteredCategoryOptions[cat].map((i:string)=><div key={i} className="flex justify-between border-b pb-2"><span className="text-sm font-medium">{i}</span><input type="number" className="w-16 p-1 bg-gray-50 border rounded text-right" value={activeTab==='expiry'?expirySettings[i]||'':stockThresholds[i]||''} onChange={(e)=>activeTab==='expiry'?handleExpiryChange(i,Number(e.target.value)):handleStockChange(i,Number(e.target.value))}/></div>)}</div></div>)}</div></>}
+        {activeTab==='api'?<div className="space-y-4"><h4 className="font-bold text-gray-800">Google Gemini APIキー</h4><input type="password" className="w-full p-3 bg-gray-50 border rounded-xl" placeholder="APIキー" value={inputApiKey} onChange={(e)=>setInputApiKey(e.target.value)}/><button onClick={()=>{saveApiKey(inputApiKey);showToast('保存しました');}} className="w-full py-3 bg-purple-600 text-white rounded-xl font-bold flex items-center justify-center gap-2"><Save className="w-4 h-4"/> 保存</button></div>:
+        <><div className="mb-6 relative"><Search className="absolute left-3 top-3 text-gray-400 w-5 h-5"/><input type="text" placeholder="食品検索..." className="w-full pl-10 pr-4 py-3 bg-gray-50 border rounded-xl" value={searchTerm} onChange={(e)=>setSearchTerm(e.target.value)}/></div><div className="space-y-6">{Object.keys(filteredCategoryOptions).map(cat=><div key={cat}><h4 className="font-bold text-gray-800 mb-2">{CATEGORY_LABELS[cat]||cat}</h4><div className="grid grid-cols-2 gap-4">{filteredCategoryOptions[cat].map((i:string)=><div key={i} className="flex justify-between border-b pb-2"><span className="text-sm font-medium">{i}</span><input type="number" className="w-16 p-1 bg-gray-50 border rounded text-right" value={activeTab==='expiry'?expirySettings[i]||'':stockThresholds[i]||''} onChange={(e)=>activeTab==='expiry'?handleExpiryChange(i,Number(e.target.value)):handleStockChange(i,Number(e.target.value))}/></div>)}</div></div>)}</div><div className="mt-8 pt-4 border-t border-gray-100 flex justify-end"><button onClick={()=>showToast('設定を保存しました')} className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-xl font-bold shadow-md hover:bg-green-700 transition-colors"><Save className="w-5 h-5"/>設定を保存</button></div></>}
       </div>
     </div>
   );
@@ -279,7 +296,7 @@ function EmojiPicker({ onSelect, onClose }: { onSelect: (emoji: string) => void,
   );
 }
 
-// 編集用モーダル (修正版)
+// 編集用モーダル
 function EditItemModal({ item, onClose, onSave, locationOptions, unitOptions }: any) {
   const [data, setData] = useState({ ...item });
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -460,7 +477,7 @@ function RecipeGenerator({ items, onAddToShoppingList, history, onAddHistory, ap
       const text = data.candidates[0].content.parts[0].text;
       const jsonStr = text.match(/\{[\s\S]*\}/)[0];
       const recipeData = JSON.parse(jsonStr);
-      const newRecipe = { id: Date.now().toString(), ...recipeData, mode, createdAt: new Date().toLocaleString(), userRequest: mode === 'custom' ? userRequest : undefined, allMaterials: [...recipeData.ingredients, ...recipeData.missing] };
+      const newRecipe = { id: Date.now().toString(), ...recipeData, mode: mode, createdAt: new Date().toLocaleString(), userRequest: mode === 'custom' ? userRequest : undefined, allMaterials: [...recipeData.ingredients, ...recipeData.missing] };
       onAddHistory(newRecipe);
       setSelectedRecipe(newRecipe);
     } catch (error) {
@@ -495,10 +512,7 @@ function RecipeGenerator({ items, onAddToShoppingList, history, onAddHistory, ap
                 <h4 className="font-bold text-gray-800 mb-3">👨‍🍳 作り方</h4>
                 <ul className="space-y-3">
                   {selectedRecipe.steps.map((step: string, idx: number) => (
-                    <li key={idx} className="flex gap-3 text-sm text-gray-600">
-                      <span className="flex-shrink-0 w-6 h-6 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center font-bold text-xs">{idx + 1}</span>
-                      <span className="pt-0.5">{step}</span>
-                    </li>
+                    <li key={idx} className="flex gap-3 text-sm text-gray-600"><span className="flex-shrink-0 w-6 h-6 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center font-bold text-xs">{idx + 1}</span><span className="pt-0.5">{step}</span></li>
                   ))}
                 </ul>
               </div>
@@ -679,9 +693,7 @@ function ScannerModal({ onClose, onScan, apiKey, categoryOptions, addCategoryOpt
               </div>
             ))}
           </div>
-          <div className="p-4 border-t border-gray-100 bg-white">
-            <button onClick={handleConfirm} className="w-full py-3 bg-green-600 text-white font-bold rounded-xl shadow-lg">選択した商品を追加</button>
-          </div>
+          <div className="p-4 border-t border-gray-100 bg-white"><button onClick={handleConfirm} className="w-full py-3 bg-green-600 text-white font-bold rounded-xl shadow-lg">選択した商品を追加</button></div>
         </div>
       </div>
     );
@@ -690,16 +702,11 @@ function ScannerModal({ onClose, onScan, apiKey, categoryOptions, addCategoryOpt
   return (
     <div className="fixed inset-0 bg-black/80 z-50 flex flex-col items-center justify-center p-4">
       <div className="bg-white w-full max-w-md rounded-3xl overflow-hidden relative flex flex-col max-h-[90vh]">
-        <div className="flex border-b border-gray-100">
-            <div className={`flex-1 py-4 font-bold text-sm flex items-center justify-center gap-2 text-blue-600 border-b-2 border-blue-600`}><FileText className="w-5 h-5" /> レシートOCR (Gemini AI)</div>
-        </div>
+        <div className="flex border-b border-gray-100"><div className={`flex-1 py-4 font-bold text-sm flex items-center justify-center gap-2 text-blue-600 border-b-2 border-blue-600`}><FileText className="w-5 h-5" /> レシートOCR (Gemini AI)</div></div>
         <div className="flex-1 bg-gray-50 relative overflow-y-auto min-h-[300px] flex flex-col items-center justify-center p-4">
           <div className="w-full flex flex-col items-center">
               {!capturedImage ? (
-                  <label className="w-full h-48 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:bg-gray-100 transition-colors mb-4">
-                      <Camera className="w-12 h-12 text-gray-400 mb-2" /><span className="text-sm text-gray-500 font-bold">写真を撮る / アップロード</span>
-                      <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleReceiptCapture} />
-                  </label>
+                  <label className="w-full h-48 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:bg-gray-100 transition-colors mb-4"><Camera className="w-12 h-12 text-gray-400 mb-2" /><span className="text-sm text-gray-500 font-bold">写真を撮る / アップロード</span><input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleReceiptCapture} /></label>
               ) : (
                   <div className="w-full mb-4 relative"><img src={capturedImage} alt="Receipt" className="w-full h-48 object-contain bg-black rounded-lg" />{scanning && (<div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center text-white rounded-lg"><Loader2 className="w-8 h-8 animate-spin mb-2" /><span className="text-xs font-bold">AI解析中...</span></div>)}</div>
               )}
