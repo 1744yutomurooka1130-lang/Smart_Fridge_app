@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Check, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles } from 'lucide-react';
-import Tesseract from 'tesseract.js';
+import React, { useState, useEffect, useMemo, ChangeEvent } from 'react';
+import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles } from 'lucide-react';
 
 // --- 型定義 ---
 type StorageType = 'refrigerator'|'freezer_main'|'freezer_sub'|'vegetable'|'ambient';
@@ -63,7 +62,7 @@ export default function App() {
     return history;
   });
 
-  const [editingItem, setEditingItem] = useState<FoodItem | null>(null); // 編集用ステート
+  const [editingItem, setEditingItem] = useState<FoodItem | null>(null);
 
   useEffect(() => { localStorage.setItem('sf_items', JSON.stringify(items)); }, [items]);
   useEffect(() => { localStorage.setItem('sf_shoppingList', JSON.stringify(shoppingList)); }, [shoppingList]);
@@ -99,8 +98,23 @@ export default function App() {
   const toggleShoppingItem = (id: string) => { setShoppingList(prev => prev.map(item => item.id === id ? { ...item, isChecked: !item.isChecked } : item)); };
   const deleteShoppingItem = (id: string) => { setShoppingList(prev => prev.filter(item => item.id !== id)); };
   const updateShoppingItemQuantity = (id: string, delta: number) => { setShoppingList(prev => prev.map(item => item.id === id ? { ...item, quantity: Math.max(1, item.quantity + delta) } : item)); };
-  const lowStockItems = useMemo(() => { const g: Record<string, number> = {}; items.forEach(i => { const k = i.categorySmall || i.name; g[k] = (g[k] || 0) + i.quantity; }); const l: string[] = []; Object.keys(stockThresholds).forEach(k => { if ((g[k] || 0) < stockThresholds[k]) l.push(k); }); return l; }, [items, stockThresholds]);
-  const statusCounts = useMemo(() => { const today = new Date().toISOString().split('T')[0]; const d3 = new Date(Date.now() + 259200000).toISOString().split('T')[0]; let e=0, w=0; items.forEach(i => { if (i.expiryDate < today) e++; else if (i.expiryDate <= d3) w++; }); return { expired: e, warning: w, total: items.length, lowStock: lowStockItems.length }; }, [items, lowStockItems]);
+
+  const lowStockItems = useMemo(() => {
+    const groupedStock: Record<string, number> = {};
+    items.forEach(i => { const k = i.categorySmall || i.name; groupedStock[k] = (groupedStock[k] || 0) + i.quantity; });
+    const lowStockList: string[] = [];
+    Object.keys(stockThresholds).forEach(k => { if ((groupedStock[k] || 0) < stockThresholds[k]) lowStockList.push(k); });
+    return lowStockList;
+  }, [items, stockThresholds]);
+
+  const statusCounts = useMemo(() => {
+    const today = new Date().toISOString().split('T')[0];
+    const threeDaysLater = new Date(Date.now() + 259200000).toISOString().split('T')[0];
+    let expired = 0, warning = 0;
+    items.forEach(i => { if (i.expiryDate < today) expired++; else if (i.expiryDate <= threeDaysLater) warning++; });
+    return { expired, warning, total: items.length, lowStock: lowStockItems.length };
+  }, [items, lowStockItems]);
+
   const deleteItem = (id: string) => { setItems(items.filter(i => i.id !== id)); showToast('商品を削除しました'); };
   const exportToKeep = () => { console.log(shoppingList.filter(i => !i.isChecked).map(i => `・${i.name} ${formatAmountStr(i.quantity, i.unit)}`).join('\n')); showToast('Google Keepのリストに追加しました (Demo)'); };
 
@@ -127,7 +141,7 @@ export default function App() {
         <EditItemModal 
           item={editingItem} 
           onClose={() => setEditingItem(null)} 
-          onSave={(updated) => { updateItem(updated); setEditingItem(null); }}
+          onSave={(updated: FoodItem) => { updateItem(updated); setEditingItem(null); }}
           categoryOptions={categoryOptions} 
           locationOptions={locationOptions}
           unitOptions={unitOptions}
@@ -338,7 +352,7 @@ function EmojiPicker({ onSelect, onClose }: { onSelect: (emoji: string) => void,
   );
 }
 
-// 編集用モーダル (新規)
+// 編集用モーダル
 function EditItemModal({ item, onClose, onSave, categoryOptions, locationOptions, unitOptions }: any) {
   const [data, setData] = useState({ ...item });
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -384,6 +398,7 @@ function AddItemForm({ onAdd, onCancel, categoryOptions, addCategoryOption, expi
     const currentName = isCustomCategory ? customCategoryName : data.categorySmall;
     if (currentName) {
       if (emojiHistory[currentName]) { setData((prev: any) => ({ ...prev, emoji: emojiHistory[currentName] })); return; }
+      const EMOJI_KEYWORDS: Record<string, string> = { '牛': '🥩', '豚': '🥩', '鶏': '🍗', '肉': '🥩', '魚': '🐟', '鮭': '🐟', '鯖': '🐟', '海老': '🦐', '牛乳': '🥛', '卵': '🥚', 'キャベツ': '🥬', 'レタス': '🥬', 'トマト': '🍅', '人参': '🥕', '玉ねぎ': '🧅', 'りんご': '🍎', 'みかん': '🍊', 'バナナ': '🍌', 'パン': '🍞', 'うどん': '🍜', 'カレー': '🍛', 'アイス': '🍨', 'チョコ': '🍫', '酒': '🍶', 'ビール': '🍺', '豆腐': '🧊', '納豆': '🥢' };
       for (const [key, emoji] of Object.entries(EMOJI_KEYWORDS)) { if (currentName.includes(key)) { setData((prev: any) => ({ ...prev, emoji: emoji })); break; } }
     } else if (data.category) {
       let defaultEmoji = '📦';
