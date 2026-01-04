@@ -8,51 +8,26 @@ type FilterMode = 'all' | 'expired' | 'near' | 'lowStock';
 interface FoodItem { id: string; name: string; storage: StorageType; category: ItemCategory; categorySmall: string; location: string; expiryDate: string; quantity: number; unit: string; addedDate: string; emoji: string; }
 interface ShoppingItem { id: string; name: string; quantity: number; unit: string; isChecked: boolean; addedDate: string; }
 interface RecipeMaterial { name: string; amount: number | string; unit: string; }
-interface Recipe { id: string; title: string; time: string; ingredients: RecipeMaterial[]; missing: RecipeMaterial[]; desc: string; mode: 'auto' | 'custom'; createdAt: string; userRequest?: string; allMaterials: RecipeMaterial[]; }
+interface Recipe { id: string; title: string; time: string; ingredients: RecipeMaterial[]; missing: RecipeMaterial[]; desc: string; steps: string[]; mode: 'auto' | 'custom'; createdAt: string; userRequest?: string; allMaterials: RecipeMaterial[]; }
+// スキャン結果確認用の一時アイテム型
+interface ScannedItem extends FoodItem { isSelected: boolean; }
 
 // --- 定数 ---
-const GEMINI_MODEL = "gemini-2.0-flash-exp";
+const GEMINI_MODEL = "gemini-3-flash-preview"; 
 
 // --- ヘルパー関数 ---
 const formatAmountStr = (amount: number | string, unit: string) => { const nonNumericUnits = ['少々', '適量', 'お好みで', 'ひとつまみ', '適宜']; return nonNumericUnits.includes(unit) ? unit : `${amount}${unit}`; };
-const fileToBase64 = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => { const result = reader.result as string; resolve(result.split(',')[1]); };
-    reader.onerror = error => reject(error);
-  });
-};
-const loadFromStorage = <T,>(key: string, initialValue: T): T => {
-  try {
-    const item = window.localStorage.getItem(key);
-    return item ? JSON.parse(item) : initialValue;
-  } catch (error) { console.error(error); return initialValue; }
-};
-
-// ★APIリトライ用共通関数（指数バックオフ） - ここで定義し、後で使用します
+const fileToBase64 = (file: File): Promise<string> => new Promise((resolve, reject) => { const reader = new FileReader(); reader.readAsDataURL(file); reader.onload = () => resolve((reader.result as string).split(',')[1]); reader.onerror = reject; });
+const loadFromStorage = <T,>(key: string, v: T): T => { try { const i = window.localStorage.getItem(key); return i ? JSON.parse(i) : v; } catch { return v; } };
 const callGeminiWithRetry = async (apiKey: string, payload: any, retries = 3, delay = 2000): Promise<any> => {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
   for (let i = 0; i <= retries; i++) {
     try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (response.ok) return await response.json();
-      if ((response.status === 429 || response.status === 503) && i < retries) {
-        console.warn(`API Error ${response.status}. Retrying in ${delay}ms...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-        delay *= 2; continue;
-      }
-      throw new Error(`Gemini API Error: ${response.status} ${response.statusText}`);
-    } catch (error) {
-      if (i === retries) throw error;
-      console.warn(`Network Error. Retrying in ${delay}ms...`);
-      await new Promise(resolve => setTimeout(resolve, delay));
-      delay *= 2;
-    }
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      if (res.ok) return await res.json();
+      if ((res.status === 429 || res.status === 503) && i < retries) { await new Promise(r => setTimeout(r, delay)); delay *= 2; continue; }
+      throw new Error(`Gemini API Error: ${res.status}`);
+    } catch (e) { if (i === retries) throw e; await new Promise(r => setTimeout(r, delay)); delay *= 2; }
   }
 };
 
@@ -68,11 +43,9 @@ const INITIAL_LOCATION_OPTIONS: Record<StorageType, string[]> = { refrigerator: 
 const DEFAULT_EXPIRY_DAYS: Record<string, number> = { '牛乳':7, '卵':14, '納豆':10, '豚肉':3, '牛肉':3, '鶏肉':2, 'キャベツ':7, 'レタス':4, 'トマト':5, '玉ねぎ':30, 'りんご':14 };
 const DEFAULT_STOCK_THRESHOLDS: Record<string, number> = { '卵':3, '牛乳':1, '納豆':1 };
 
-// --- アプリケーション本体 ---
+// --- コンポーネント実装 ---
 export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard'|'inventory'|'add'|'recipes'|'shopping'|'settings'>('dashboard');
-  
-  // データの永続化
   const [items, setItems] = useState<FoodItem[]>(() => loadFromStorage('sf_items', INITIAL_ITEMS));
   const [shoppingList, setShoppingList] = useState<ShoppingItem[]>(() => loadFromStorage('sf_shoppingList', INITIAL_SHOPPING_LIST));
   const [recipeHistory, setRecipeHistory] = useState<Recipe[]>(() => loadFromStorage('sf_recipeHistory', []));
@@ -90,7 +63,6 @@ export default function App() {
     return history;
   });
 
-  // 保存用Effect
   useEffect(() => { localStorage.setItem('sf_items', JSON.stringify(items)); }, [items]);
   useEffect(() => { localStorage.setItem('sf_shoppingList', JSON.stringify(shoppingList)); }, [shoppingList]);
   useEffect(() => { localStorage.setItem('sf_recipeHistory', JSON.stringify(recipeHistory)); }, [recipeHistory]);
@@ -105,26 +77,11 @@ export default function App() {
   const [showScannerModal, setShowScannerModal] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
 
-  useEffect(() => {
-    const savedKey = localStorage.getItem('GEMINI_API_KEY');
-    if (savedKey) setGeminiApiKey(savedKey);
-  }, []);
-
+  useEffect(() => { const savedKey = localStorage.getItem('GEMINI_API_KEY'); if (savedKey) setGeminiApiKey(savedKey); }, []);
   const saveApiKey = (key: string) => { setGeminiApiKey(key); localStorage.setItem('GEMINI_API_KEY', key); showToast('APIキーを保存しました'); };
   const showToast = (msg: string) => { setNotification(msg); setTimeout(() => setNotification(null), 3000); };
-
-  const addCategoryOption = (category: ItemCategory, newOption: string) => {
-    setCategoryOptions((prev: any) => {
-      const currentOptions = prev[category] || [];
-      return !currentOptions.includes(newOption) ? { ...prev, [category]: [...currentOptions, newOption] } : prev;
-    });
-  };
-  const addLocationOption = (storage: StorageType, newOption: string) => {
-    setLocationOptions((prev: any) => {
-      const currentOptions = prev[storage] || [];
-      return !currentOptions.includes(newOption) ? { ...prev, [storage]: [...currentOptions, newOption] } : prev;
-    });
-  };
+  const addCategoryOption = (category: ItemCategory, newOption: string) => { setCategoryOptions((prev:any) => { const current = prev[category]||[]; return !current.includes(newOption) ? {...prev, [category]: [...current, newOption]} : prev; }); };
+  const addLocationOption = (storage: StorageType, newOption: string) => { setLocationOptions((prev:any) => { const current = prev[storage]||[]; return !current.includes(newOption) ? {...prev, [storage]: [...current, newOption]} : prev; }); };
   const addUnitOption = (newUnit: string) => { setUnitOptions(prev => !prev.includes(newUnit) ? [...prev, newUnit] : prev); };
   const updateEmojiHistory = (name: string, emoji: string) => { setEmojiHistory(prev => ({ ...prev, [name]: emoji })); };
   const addRecipeToHistory = (recipe: Recipe) => { setRecipeHistory(prev => [recipe, ...prev]); };
@@ -140,23 +97,8 @@ export default function App() {
   const toggleShoppingItem = (id: string) => { setShoppingList(prev => prev.map(item => item.id === id ? { ...item, isChecked: !item.isChecked } : item)); };
   const deleteShoppingItem = (id: string) => { setShoppingList(prev => prev.filter(item => item.id !== id)); };
   const updateShoppingItemQuantity = (id: string, delta: number) => { setShoppingList(prev => prev.map(item => item.id === id ? { ...item, quantity: Math.max(1, item.quantity + delta) } : item)); };
-
-  const lowStockItems = useMemo(() => {
-    const groupedStock: Record<string, number> = {};
-    items.forEach(item => { const key = item.categorySmall || item.name; groupedStock[key] = (groupedStock[key] || 0) + item.quantity; });
-    const lowStockList: string[] = [];
-    Object.keys(stockThresholds).forEach(key => { if ((groupedStock[key] || 0) < stockThresholds[key]) lowStockList.push(key); });
-    return lowStockList;
-  }, [items, stockThresholds]);
-
-  const statusCounts = useMemo(() => {
-    const today = new Date().toISOString().split('T')[0];
-    const threeDaysLater = new Date(Date.now() + 259200000).toISOString().split('T')[0];
-    let expired = 0, warning = 0;
-    items.forEach(item => { if (item.expiryDate < today) expired++; else if (item.expiryDate <= threeDaysLater) warning++; });
-    return { expired, warning, total: items.length, lowStock: lowStockItems.length };
-  }, [items, lowStockItems]);
-
+  const lowStockItems = useMemo(() => { const g: Record<string, number> = {}; items.forEach(i => { const k = i.categorySmall || i.name; g[k] = (g[k] || 0) + i.quantity; }); const l: string[] = []; Object.keys(stockThresholds).forEach(k => { if ((g[k] || 0) < stockThresholds[k]) l.push(k); }); return l; }, [items, stockThresholds]);
+  const statusCounts = useMemo(() => { const today = new Date().toISOString().split('T')[0]; const d3 = new Date(Date.now() + 259200000).toISOString().split('T')[0]; let e=0, w=0; items.forEach(i => { if (i.expiryDate < today) e++; else if (i.expiryDate <= d3) w++; }); return { expired: e, warning: w, total: items.length, lowStock: lowStockItems.length }; }, [items, lowStockItems]);
   const deleteItem = (id: string) => { setItems(items.filter(i => i.id !== id)); showToast('商品を削除しました'); };
   const exportToKeep = () => { console.log(shoppingList.filter(i => !i.isChecked).map(i => `・${i.name} ${formatAmountStr(i.quantity, i.unit)}`).join('\n')); showToast('Google Keepのリストに追加しました (Demo)'); };
 
@@ -173,30 +115,21 @@ export default function App() {
         {activeTab === 'shopping' && <ShoppingList items={shoppingList} onToggle={toggleShoppingItem} onDelete={deleteShoppingItem} onAdd={addToShoppingList} onUpdateQuantity={updateShoppingItemQuantity} onExport={exportToKeep} unitOptions={unitOptions} addUnitOption={addUnitOption} />}
         {activeTab === 'settings' && <SettingsScreen categoryOptions={categoryOptions} expirySettings={expirySettings} setExpirySettings={setExpirySettings} stockThresholds={stockThresholds} setStockThresholds={setStockThresholds} showToast={showToast} apiKey={geminiApiKey} saveApiKey={saveApiKey} />}
       </main>
-      {showScannerModal && <ScannerModal onClose={() => setShowScannerModal(false)} onScan={(scannedItems: FoodItem[]) => { setItems([...items, ...scannedItems]); setShowScannerModal(false); showToast(`${scannedItems.length}件のアイテムを解析しました`); }} apiKey={geminiApiKey} categoryOptions={categoryOptions} addCategoryOption={addCategoryOption} locationOptions={locationOptions} addLocationOption={addLocationOption} emojiHistory={emojiHistory} expirySettings={expirySettings} />}
+      {showScannerModal && <ScannerModal onClose={() => setShowScannerModal(false)} onScan={(scannedItems: FoodItem[]) => { setItems([...items, ...scannedItems]); setShowScannerModal(false); showToast(`${scannedItems.length}件のアイテムを追加しました`); }} apiKey={geminiApiKey} categoryOptions={categoryOptions} addCategoryOption={addCategoryOption} locationOptions={locationOptions} addLocationOption={addLocationOption} emojiHistory={emojiHistory} expirySettings={expirySettings} />}
     </div>
   );
 }
 
 // --- Subcomponents ---
-
 function Navigation({ activeTab, setActiveTab, counts }: any) {
   const tabs = [ { id: 'dashboard', icon: LayoutDashboard, label: 'ホーム' }, { id: 'inventory', icon: Refrigerator, label: '冷蔵庫' }, { id: 'add', icon: Plus, label: '追加', isAction: true }, { id: 'recipes', icon: ChefHat, label: 'レシピ' }, { id: 'shopping', icon: ShoppingCart, label: '買い物' }, { id: 'settings', icon: Settings, label: '設定' }];
   return (
     <>
       <div className="hidden md:flex flex-col w-64 bg-white h-screen fixed left-0 top-0 border-r border-gray-200 shadow-sm z-10">
         <div className="p-6"><h1 className="text-2xl font-bold text-green-600 flex items-center gap-2"><Refrigerator className="w-8 h-8" />SmartFridge</h1></div>
-        <nav className="flex-1 px-4 space-y-2">{tabs.map(tab => (
-          <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === tab.id ? 'bg-green-100 text-green-700 font-semibold' : 'text-gray-500 hover:bg-gray-100'}`}>
-            <div className="relative"><tab.icon className="w-6 h-6" />{tab.id === 'inventory' && (counts.expired > 0 ? <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white"></span> : counts.lowStock > 0 ? <span className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></span> : null)}</div>{tab.label}
-          </button>
-        ))}</nav>
+        <nav className="flex-1 px-4 space-y-2">{tabs.map(tab => (<button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === tab.id ? 'bg-green-100 text-green-700 font-semibold' : 'text-gray-500 hover:bg-gray-100'}`}><div className="relative"><tab.icon className="w-6 h-6" />{tab.id === 'inventory' && (counts.expired > 0 ? <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white"></span> : counts.lowStock > 0 ? <span className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></span> : null)}</div>{tab.label}</button>))}</nav>
       </div>
-      <div className="md:hidden fixed bottom-0 left-0 w-full bg-white border-t border-gray-200 z-40 px-2 py-2 flex justify-between items-center shadow-lg safe-area-bottom">{tabs.map(tab => (
-        <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex flex-col items-center justify-center w-full p-2 rounded-lg ${activeTab === tab.id ? 'text-green-600' : 'text-gray-400'}`}>
-          {tab.isAction ? <div className="bg-green-500 text-white p-3 rounded-full shadow-md transform -translate-y-4 border-4 border-gray-50"><Plus className="w-6 h-6" /></div> : <><div className="relative"><tab.icon className="w-6 h-6 mb-1" />{tab.id === 'inventory' && (counts.expired > 0 ? <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full"></span> : counts.lowStock > 0 ? <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-blue-500 rounded-full"></span> : null)}</div><span className="text-[10px] font-medium">{tab.label}</span></>}
-        </button>
-      ))}</div>
+      <div className="md:hidden fixed bottom-0 left-0 w-full bg-white border-t border-gray-200 z-40 px-2 py-2 flex justify-between items-center shadow-lg safe-area-bottom">{tabs.map(tab => (<button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex flex-col items-center justify-center w-full p-2 rounded-lg ${activeTab === tab.id ? 'text-green-600' : 'text-gray-400'}`}>{tab.isAction ? <div className="bg-green-500 text-white p-3 rounded-full shadow-md transform -translate-y-4 border-4 border-gray-50"><Plus className="w-6 h-6" /></div> : <><div className="relative"><tab.icon className="w-6 h-6 mb-1" />{tab.id === 'inventory' && (counts.expired > 0 ? <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full"></span> : counts.lowStock > 0 ? <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-blue-500 rounded-full"></span> : null)}</div><span className="text-[10px] font-medium">{tab.label}</span></>}</button>))}</div>
     </>
   );
 }
@@ -204,18 +137,12 @@ function Navigation({ activeTab, setActiveTab, counts }: any) {
 function Header({ activeTab, setShowScannerModal }: any) {
   const titles: any = { dashboard: 'ダッシュボード', inventory: '在庫管理', add: '食品の追加', recipes: 'AIレシピ提案', shopping: '買い物リスト', settings: '設定' };
   return (
-    <header className="flex justify-between items-center mb-6">
-      <h2 className="text-2xl font-bold text-gray-800">{titles[activeTab]}</h2>
-      {activeTab !== 'settings' && (<div className="flex gap-2"><button className="p-2 bg-white rounded-full shadow-sm border border-gray-200 text-gray-600"><Search className="w-5 h-5" /></button><button onClick={() => setShowScannerModal(true)} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-full shadow-md hover:bg-blue-700 transition-colors"><Camera className="w-4 h-4" /><span className="hidden sm:inline">レシート読取</span></button></div>)}
-    </header>
+    <header className="flex justify-between items-center mb-6"><h2 className="text-2xl font-bold text-gray-800">{titles[activeTab]}</h2>{activeTab !== 'settings' && (<div className="flex gap-2"><button className="p-2 bg-white rounded-full shadow-sm border border-gray-200 text-gray-600"><Search className="w-5 h-5" /></button><button onClick={() => setShowScannerModal(true)} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-full shadow-md hover:bg-blue-700 transition-colors"><Camera className="w-4 h-4" /><span className="hidden sm:inline">レシート読取</span></button></div>)}</header>
   );
 }
 
 function Dashboard({ items, counts, setActiveTab, setInventoryFilterMode }: any) {
-  const dates = Array.from({ length: 14 }, (_, i) => {
-    const d = new Date(); d.setDate(d.getDate() + i);
-    return { date: d, iso: d.toISOString().split('T')[0], day: d.toLocaleDateString('ja-JP', { weekday: 'short' }) };
-  });
+  const dates = Array.from({ length: 14 }, (_, i) => { const d = new Date(); d.setDate(d.getDate() + i); return { date: d, iso: d.toISOString().split('T')[0], day: d.toLocaleDateString('ja-JP', { weekday: 'short' }) }; });
   const handleCardClick = (filter: FilterMode) => { setInventoryFilterMode(filter); setActiveTab('inventory'); };
   return (
     <div className="space-y-6">
@@ -267,7 +194,6 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
   const [filter, setFilter] = useState<StorageType | 'all'>('all');
   const [sortBy, setSortBy] = useState<'expiry' | 'added' | 'name'>('expiry');
   const [isGrouped, setIsGrouped] = useState(true);
-
   const displayItems = useMemo(() => {
     let baseItems = [...items];
     if (inventoryFilterMode === 'lowStock') {
@@ -283,14 +209,12 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
     }
     return baseItems;
   }, [items, inventoryFilterMode, lowStockItems]);
-
   const filteredItems = displayItems.filter((item: any) => {
     if (inventoryFilterMode === 'lowStock') { const key = item.categorySmall || item.name; return lowStockItems.includes(key); }
     if (inventoryFilterMode === 'expired') { const today = new Date().toISOString().split('T')[0]; return item.expiryDate < today && item.quantity > 0; }
     if (inventoryFilterMode === 'near') { const today = new Date().toISOString().split('T')[0]; const threeDaysLater = new Date(Date.now() + 259200000).toISOString().split('T')[0]; return item.expiryDate >= today && item.expiryDate <= threeDaysLater && item.quantity > 0; }
     return filter === 'all' ? true : item.storage === filter;
   });
-
   const getSortedItems = (itemsToSort: FoodItem[]) => {
     const sorted = [...itemsToSort];
     if (sortBy === 'expiry') sorted.sort((a, b) => { if (!a.expiryDate) return 1; if (!b.expiryDate) return -1; return a.expiryDate.localeCompare(b.expiryDate); });
@@ -298,10 +222,8 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
     else if (sortBy === 'name') sorted.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
     return sorted;
   };
-
   const filters: { id: StorageType | 'all', label: string, icon: any }[] = [{ id: 'all', label: 'すべて', icon: LayoutDashboard }, { id: 'refrigerator', label: '冷蔵室', icon: Refrigerator }, { id: 'vegetable', label: '野菜室', icon: Carrot }, { id: 'freezer_main', label: '冷凍(主)', icon: Snowflake }, { id: 'freezer_sub', label: '冷凍(副)', icon: IceCream }, { id: 'ambient', label: '常温', icon: Sun }];
   const modeTabs: { id: FilterMode, label: string, icon: any, color: string }[] = [{ id: 'all', label: 'すべて', icon: LayoutDashboard, color: 'bg-gray-100 text-gray-600' }, { id: 'expired', label: '期限切れ', icon: AlertTriangle, color: 'bg-red-100 text-red-600' }, { id: 'near', label: '期限近', icon: AlertOctagon, color: 'bg-yellow-100 text-yellow-600' }, { id: 'lowStock', label: '在庫少', icon: TrendingDown, color: 'bg-blue-100 text-blue-600' }];
-
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-4 gap-2 bg-white p-2 rounded-xl shadow-sm border border-gray-100">
@@ -535,7 +457,7 @@ function RecipeGenerator({ items, onAddToShoppingList, history, onAddHistory, ap
     setLoading(true);
     if (!apiKey) { alert("APIキーが設定されていません。設定画面でキーを入力してください。"); setLoading(false); return; }
     const inventoryList = items.map((i: any) => `${i.name} (${i.quantity}${i.unit})`).join(', ');
-    let prompt = `あなたはプロのシェフです。以下の食材リストにあるものを使って、家庭で作れる美味しいレシピを1つ提案してください。\n\n【食材リスト】\n${inventoryList}\n\n【条件】\n- 可能な限りリストにある食材を使用してください。\n- 足りない調味料や食材があれば「不足している材料」として挙げてくだい。\n- 出力は以下のJSON形式のみで行ってください。余計な説明は不要です。\n\n【JSON形式】\n{\n  "title": "料理名",\n  "time": "調理時間（例：20分）",\n  "desc": "料理の簡単な説明と魅力（100文字程度）",\n  "ingredients": [\n    {"name": "食材名", "amount": "分量", "unit": "単位"} \n  ],\n  "missing": [\n     {"name": "不足食材名", "amount": "分量", "unit": "単位"}\n  ]\n}`;
+    let prompt = `あなたはプロのシェフです。以下の食材リストにあるものを使って、家庭で作れる美味しいレシピを1つ提案してください。\n\n【食材リスト】\n${inventoryList}\n\n【条件】\n- 可能な限りリストにある食材を使用してください。\n- 足りない調味料や食材があれば「不足している材料」として挙げてくだい。\n- 具体的な調理手順（steps）を配列で出力してください。素人でもわかるように量や時間を具体的に記載してください。\n- 出力は以下のJSON形式のみで行ってください。余計な説明は不要です。\n\n【JSON形式】\n{\n  "title": "料理名",\n  "time": "調理時間（例：20分）",\n  "desc": "料理の簡単な説明と魅力（100文字程度）",\n  "ingredients": [\n    {"name": "食材名", "amount": "分量", "unit": "単位"} \n  ],\n  "missing": [\n     {"name": "不足食材名", "amount": "分量", "unit": "単位"}\n  ],\n  "steps": [\n    "手順1...",\n    "手順2..."\n  ]\n}`;
     if (mode === 'custom' && userRequest) { prompt += `\n【ユーザーからの要望】\n${userRequest}\nこの要望を最大限反映してください。`; }
 
     try {
@@ -569,10 +491,23 @@ function RecipeGenerator({ items, onAddToShoppingList, history, onAddHistory, ap
             <div className="flex justify-between items-start mb-2"><h3 className="text-xl font-bold text-gray-800">{selectedRecipe.title}</h3><span className="text-xs text-gray-400">{selectedRecipe.createdAt}</span></div>
             <div className="flex gap-2 text-sm text-gray-500 mb-4"><span>⏱ {selectedRecipe.time}</span><span>👨‍🍳 {selectedRecipe.mode === 'custom' ? '要望対応' : '簡単'}</span></div>
             <div className="mb-4"><h4 className="font-bold text-sm text-gray-700 mb-2">使用する在庫</h4><div className="flex flex-wrap gap-2">{selectedRecipe.ingredients.length > 0 ? (selectedRecipe.ingredients.map((i: RecipeMaterial, idx: number) => (<span key={idx} className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs">{i.name} {i.amount}{i.unit}</span>))) : (<span className="text-gray-400 text-xs">なし</span>)}</div></div>
-            {selectedRecipe.missing && selectedRecipe.missing.length > 0 ? (
+            {selectedRecipe.missing && selectedRecipe.missing.length > 0 && (
               <div className="mb-4"><h4 className="font-bold text-sm text-red-700 mb-2 flex items-center gap-1"><AlertTriangle className="w-3 h-3" />不足している材料</h4><div className="flex flex-wrap gap-2 mb-3">{selectedRecipe.missing.map((i: RecipeMaterial, idx: number) => (<span key={idx} className="bg-red-50 text-red-700 border border-red-100 px-2 py-1 rounded text-xs">{i.name} {i.amount}{i.unit}</span>))}</div><button onClick={() => handleAddMissingItems(selectedRecipe)} className="w-full py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg text-sm font-bold hover:bg-red-100 flex items-center justify-center gap-2 transition-colors"><Plus className="w-4 h-4" />不足している{selectedRecipe.missing.length}点を買い物リストへ</button></div>
-            ) : (<div className="mb-4 bg-green-50 border border-green-200 p-3 rounded-lg flex items-center gap-2 text-green-700 text-sm font-bold"><Check className="w-5 h-5" />すべての材料が揃っています！</div>)}
+            )}
             <p className="text-gray-600 text-sm leading-relaxed mb-6">{selectedRecipe.desc}</p>
+            {selectedRecipe.steps && selectedRecipe.steps.length > 0 && (
+              <div className="mt-6 border-t border-gray-100 pt-4">
+                <h4 className="font-bold text-gray-800 mb-3">👨‍🍳 作り方</h4>
+                <ul className="space-y-3">
+                  {selectedRecipe.steps.map((step: string, idx: number) => (
+                    <li key={idx} className="flex gap-3 text-sm text-gray-600">
+                      <span className="flex-shrink-0 w-6 h-6 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center font-bold text-xs">{idx + 1}</span>
+                      <span className="pt-0.5">{step}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -637,6 +572,8 @@ function ShoppingList({ items, onToggle, onDelete, onAdd, onUpdateQuantity, onEx
 function ScannerModal({ onClose, onScan, apiKey, categoryOptions, addCategoryOption, locationOptions, addLocationOption, emojiHistory, expirySettings }: any) {
   const [scanning, setScanning] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [scannedItems, setScannedItems] = useState<ScannedItem[]>([]);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const handleReceiptCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -667,7 +604,7 @@ function ScannerModal({ onClose, onScan, apiKey, categoryOptions, addCategoryOpt
         const jsonStr = text.match(/\{[\s\S]*\}/)[0];
         const result = JSON.parse(jsonStr);
 
-        const scannedItems = result.items.map((item: any, index: number) => ({
+        const items = result.items.map((item: any, index: number) => ({
           id: Date.now().toString() + index,
           name: item.name,
           storage: 'refrigerator',
@@ -678,25 +615,12 @@ function ScannerModal({ onClose, onScan, apiKey, categoryOptions, addCategoryOpt
           quantity: item.quantity || 1,
           unit: item.unit || '個',
           addedDate: new Date().toISOString().split('T')[0],
-          emoji: item.emoji || '📦'
+          emoji: item.emoji || '📦',
+          isSelected: true // デフォルトで選択状態
         }));
 
-        scannedItems.forEach((item: FoodItem) => {
-             const catOpts = categoryOptions[item.category] || [];
-             if (!catOpts.includes(item.categorySmall)) addCategoryOption(item.category, item.categorySmall);
-             
-             const locOpts = locationOptions[item.storage] || [];
-             if (!locOpts.includes(item.location)) addLocationOption(item.storage, item.location);
-
-             if (emojiHistory[item.categorySmall]) item.emoji = emojiHistory[item.categorySmall];
-             
-             if (expirySettings[item.categorySmall] && !item.expiryDate) {
-                 const d = new Date(); d.setDate(d.getDate() + expirySettings[item.categorySmall]);
-                 item.expiryDate = d.toISOString().split('T')[0];
-             }
-        });
-
-        onScan(scannedItems);
+        setScannedItems(items);
+        setShowConfirm(true); // 確認画面へ
       } catch (error) {
         console.error("Gemini OCR Error:", error);
         alert("画像の解析に失敗しました。");
@@ -705,6 +629,66 @@ function ScannerModal({ onClose, onScan, apiKey, categoryOptions, addCategoryOpt
       }
     }
   };
+
+  const handleConfirm = () => {
+    const itemsToAdd = scannedItems.filter(i => i.isSelected).map(({ isSelected, ...rest }) => rest);
+    
+    // 学習データの更新
+    itemsToAdd.forEach((item: FoodItem) => {
+         const catOpts = categoryOptions[item.category] || [];
+         if (!catOpts.includes(item.categorySmall)) addCategoryOption(item.category, item.categorySmall);
+         
+         const locOpts = locationOptions[item.storage] || [];
+         if (!locOpts.includes(item.location)) addLocationOption(item.storage, item.location);
+
+         if (emojiHistory[item.categorySmall]) item.emoji = emojiHistory[item.categorySmall];
+         
+         if (expirySettings[item.categorySmall] && !item.expiryDate) {
+             const d = new Date(); d.setDate(d.getDate() + expirySettings[item.categorySmall]);
+             item.expiryDate = d.toISOString().split('T')[0];
+         }
+    });
+
+    onScan(itemsToAdd);
+  };
+
+  const updateScannedItem = (index: number, field: string, value: any) => {
+    const newItems = [...scannedItems];
+    newItems[index] = { ...newItems[index], [field]: value };
+    setScannedItems(newItems);
+  };
+
+  if (showConfirm) {
+    return (
+      <div className="fixed inset-0 bg-black/80 z-50 flex flex-col items-center justify-center p-4">
+        <div className="bg-white w-full max-w-md rounded-3xl overflow-hidden flex flex-col max-h-[90vh]">
+          <div className="p-4 border-b border-gray-100 flex justify-between items-center">
+            <h3 className="font-bold text-gray-800">スキャン結果の確認</h3>
+            <button onClick={onClose} className="p-1"><X className="w-5 h-5 text-gray-500" /></button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            {scannedItems.map((item, index) => (
+              <div key={index} className={`flex items-center gap-3 p-3 rounded-xl border ${item.isSelected ? 'border-green-500 bg-green-50' : 'border-gray-200 opacity-60'}`}>
+                <button onClick={() => updateScannedItem(index, 'isSelected', !item.isSelected)}>
+                  {item.isSelected ? <CheckSquare className="w-5 h-5 text-green-500" /> : <Square className="w-5 h-5 text-gray-400" />}
+                </button>
+                <div className="flex-1 space-y-1">
+                  <input className="w-full bg-transparent font-bold border-b border-gray-300 focus:border-green-500 outline-none" value={item.name} onChange={(e) => updateScannedItem(index, 'name', e.target.value)} />
+                  <div className="flex gap-2">
+                    <input type="number" className="w-16 bg-white border border-gray-200 rounded px-1 text-sm" value={item.quantity} onChange={(e) => updateScannedItem(index, 'quantity', Number(e.target.value))} />
+                    <input className="w-16 bg-white border border-gray-200 rounded px-1 text-sm" value={item.unit} onChange={(e) => updateScannedItem(index, 'unit', e.target.value)} />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="p-4 border-t border-gray-100 bg-white">
+            <button onClick={handleConfirm} className="w-full py-3 bg-green-600 text-white font-bold rounded-xl shadow-lg">選択した商品を追加</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black/80 z-50 flex flex-col items-center justify-center p-4">
