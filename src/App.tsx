@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles } from 'lucide-react';
+import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Check, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles } from 'lucide-react';
 
 // --- 型定義 ---
 type StorageType = 'refrigerator'|'freezer_main'|'freezer_sub'|'vegetable'|'ambient';
@@ -14,7 +14,7 @@ interface ScannedItem extends FoodItem { isSelected: boolean; }
 // --- 定数 ---
 const GEMINI_MODEL = "gemini-3-flash-preview"; 
 
-// --- ヘルパー関数 ---
+// --- ヘルパー ---
 const formatAmountStr = (amount: number|string, unit: string) => { const u=['少々','適量','お好みで','ひとつまみ','適宜']; return u.includes(unit)?unit:`${amount}${unit}`; };
 const fileToBase64 = (file: File): Promise<string> => new Promise((resolve, reject) => { const reader = new FileReader(); reader.readAsDataURL(file); reader.onload = () => resolve((reader.result as string).split(',')[1]); reader.onerror = reject; });
 const loadFromStorage = <T,>(key: string, v: T): T => { try { const i = window.localStorage.getItem(key); return i ? JSON.parse(i) : v; } catch { return v; } };
@@ -24,15 +24,15 @@ const callGeminiWithRetry = async (apiKey: string, payload: any, retries = 3, de
     try {
       const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       if (res.ok) return await res.json();
-      if ((res.status === 429 || res.status === 503) && i < retries) { await new Promise(r => setTimeout(r, delay)); delay *= 2; continue; }
+      if ((res.status===429 || res.status===503) && i<retries) { await new Promise(r => setTimeout(r, delay)); delay *= 2; continue; }
       throw new Error(`Gemini API Error: ${res.status}`);
     } catch (e) { if (i===retries) throw e; await new Promise(r => setTimeout(r, delay)); delay *= 2; }
   }
 };
 
-// --- 初期データ（圧縮） ---
-const INITIAL_ITEMS: FoodItem[] = [{ id: '1', name: '牛乳', storage: 'refrigerator', category: 'dairy', categorySmall: '牛乳', location: 'ドアポケット', expiryDate: new Date(Date.now() + 172800000).toISOString().split('T')[0], quantity: 1, unit: '本', addedDate: '2023-10-25', emoji: '🥛' }];
-const INITIAL_SHOPPING_LIST: ShoppingItem[] = [{ id: 's1', name: '醤油', quantity: 1, unit: '本', isChecked: false, addedDate: '2023-10-25' }];
+// --- データ (圧縮) ---
+const INITIAL_ITEMS: FoodItem[] = [{id:'1',name:'牛乳',storage:'refrigerator',category:'dairy',categorySmall:'牛乳',location:'ドアポケット',expiryDate:new Date(Date.now()+172800000).toISOString().split('T')[0],quantity:1,unit:'本',addedDate:'2023-10-25',emoji:'🥛'},{id:'2',name:'卵',storage:'refrigerator',category:'egg',categorySmall:'卵',location:'上段',expiryDate:new Date(Date.now()+432000000).toISOString().split('T')[0],quantity:2,unit:'個',addedDate:'2023-10-20',emoji:'🥚'},{id:'3',name:'豚バラ肉',storage:'freezer_main',category:'meat',categorySmall:'豚肉',location:'上段トレー',expiryDate:new Date(Date.now()+1728000000).toISOString().split('T')[0],quantity:200,unit:'g',addedDate:'2023-10-15',emoji:'🥩'}];
+const INITIAL_SHOPPING_LIST: ShoppingItem[] = [{id:'s1',name:'醤油',quantity:1,unit:'本',isChecked:false,addedDate:'2023-10-25'}];
 const INITIAL_UNIT_OPTIONS = ['個','本','g','kg','ml','L','パック','玉','袋','束','枚','切れ','缶','瓶','箱','少々','適量'];
 const EMOJI_KEYWORDS: Record<string, string> = { '牛':'🥩','豚':'🥩','鶏':'🍗','肉':'🥩','魚':'🐟','鮭':'🐟','鯖':'🐟','海老':'🦐','牛乳':'🥛','卵':'🥚','キャベツ':'🥬','レタス':'🥬','トマト':'🍅','人参':'🥕','玉ねぎ':'🧅','りんご':'🍎','みかん':'🍊','バナナ':'🍌','パン':'🍞','うどん':'🍜','カレー':'🍛','アイス':'🍨','チョコ':'🍫','酒':'🍶','ビール':'🍺','豆腐':'🧊','納豆':'🥢' };
 const EMOJI_LIBRARY: Record<string, string[]> = { '野菜・果物': ['🥦','🥬','🥒','🌽','🥕','🥔','🍅','🍆','🧅','🍎','🍊','🍌','🍇','🍓','🍑','🍍','🥝'], '肉・魚・卵': ['🥩','🍗','🥓','🍖','🍔','🐟','🐠','🦐','🦀','🦑','🍣','🥚','🍳'], '乳製品・飲料': ['🥛','🧀','🧈','🍦','🍵','☕','🧃','🥤','🍺','🍷'], '穀物・麺類': ['🍚','🍙','🍜','🍝','🍞','🥐','🥪','🍕'], 'その他': ['🍱','🥫','🥢','🍫','🍬','🍮','🧂','🥡'] };
@@ -116,8 +116,6 @@ export default function App() {
   }, [items, lowStockItems]);
 
   const deleteItem = (id: string) => { setItems(items.filter(i => i.id !== id)); showToast('商品を削除しました'); };
-  
-  // exportToKeep をここで使用するために定義
   const exportToKeep = () => { console.log(shoppingList.filter(i => !i.isChecked).map(i => `・${i.name} ${formatAmountStr(i.quantity, i.unit)}`).join('\n')); showToast('Google Keepのリストに追加しました (Demo)'); };
 
   const updateItem = (updatedItem: FoodItem) => {
@@ -144,7 +142,7 @@ export default function App() {
   );
 }
 
-// --- Subcomponents ---
+// --- Components ---
 function Navigation({ activeTab, setActiveTab, counts }: any) {
   const tabs = [ { id: 'dashboard', icon: LayoutDashboard, label: 'ホーム' }, { id: 'inventory', icon: Refrigerator, label: '冷蔵庫' }, { id: 'add', icon: Plus, label: '追加', isAction: true }, { id: 'recipes', icon: ChefHat, label: 'レシピ' }, { id: 'shopping', icon: ShoppingCart, label: '買い物' }, { id: 'settings', icon: Settings, label: '設定' }];
   return (
@@ -204,7 +202,15 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
        const existingNames = new Set(items.map((i: any) => i.categorySmall || i.name));
        const missingNames = lowStockItems.filter((name: string) => !existingNames.has(name));
        const missingFoodItems: FoodItem[] = missingNames.map((name: string) => {
-         let emoji='📦'; for(const[k,v]of Object.entries(EMOJI_KEYWORDS)){if(name.includes(k)){emoji=v;break;}}
+         let emoji='📦'; 
+         // 簡易マッチング
+         if(name.includes('牛')||name.includes('豚')||name.includes('肉')) emoji='🥩';
+         else if(name.includes('魚')||name.includes('鮭')) emoji='🐟';
+         else if(name.includes('野菜')||name.includes('キャベツ')) emoji='🥦';
+         else if(name.includes('果物')||name.includes('りんご')) emoji='🍎';
+         else if(name.includes('卵')) emoji='🥚';
+         else if(name.includes('乳')||name.includes('牛乳')) emoji='🥛';
+         
          return { id: `temp-${name}`, name, storage: 'ambient', category: 'other', categorySmall: name, location: '', expiryDate: '', quantity: 0, unit: '個', addedDate: '', emoji };
        });
        baseItems = [...baseItems, ...missingFoodItems];
@@ -277,8 +283,8 @@ function SettingsScreen({ categoryOptions, expirySettings, setExpirySettings, st
     <div className="space-y-6">
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
         <h3 className="font-bold text-xl mb-4 flex items-center gap-2"><Settings className="w-6 h-6 text-gray-600"/>アプリ設定</h3>
-        <div className="flex bg-gray-100 p-1 rounded-xl mb-6 overflow-x-auto"><button onClick={()=>setActiveTab('expiry')} className={`flex-1 py-2 px-2 rounded-lg text-sm font-bold whitespace-nowrap ${activeTab==='expiry'?'bg-white text-green-600 shadow-sm':'text-gray-500'}`}>賞味期限</button><button onClick={()=>setActiveTab('stock')} className={`flex-1 py-2 px-2 rounded-lg text-sm font-bold whitespace-nowrap ${activeTab==='stock'?'bg-white text-blue-600 shadow-sm':'text-gray-500'}`}>在庫アラート</button><button onClick={()=>setActiveTab('api')} className={`flex-1 py-2 px-2 rounded-lg text-sm font-bold whitespace-nowrap ${activeTab==='api'?'bg-white text-purple-600 shadow-sm':'text-gray-500'}`}>AI設定</button></div>
-        {activeTab==='api'?<div className="space-y-4"><h4 className="font-bold text-gray-800">Google Gemini APIキー</h4><input type="password" className="w-full p-3 bg-gray-50 border rounded-xl" placeholder="APIキー" value={inputApiKey} onChange={(e)=>setInputApiKey(e.target.value)}/><button onClick={()=>{saveApiKey(inputApiKey);showToast('保存しました');}} className="w-full py-3 bg-purple-600 text-white rounded-xl font-bold flex items-center justify-center gap-2"><Save className="w-4 h-4"/> 保存</button></div>:
+        <div className="flex bg-gray-100 p-1 rounded-xl mb-6 overflow-x-auto"><button onClick={()=>setActiveTab('expiry')} className={`flex-1 py-2 px-2 rounded-lg text-sm font-bold whitespace-nowrap ${activeTab==='expiry'?'bg-white text-green-600 shadow-sm':'text-gray-500'}`}>賞味期限</button><button onClick={()=>setActiveTab('stock')} className={`flex-1 py-2 px-2 rounded-lg text-sm font-bold whitespace-nowrap ${activeTab==='stock'?'bg-white text-blue-600 shadow-sm':'text-gray-500'}`}>在庫アラート</button><button onClick={()=>setActiveTab('api')} className={`flex-1 py-2 px-2 rounded-lg text-sm font-bold whitespace-nowrap ${activeTab==='api'?'bg-white text-purple-600 shadow-sm':'text-gray-500'}`}><Sparkles className="w-4 h-4 inline mr-1"/>AI設定</button></div>
+        {activeTab==='api'?<div className="space-y-4"><h4 className="font-bold text-gray-800">Google Gemini APIキー</h4><input type="password" className="w-full p-3 bg-gray-50 border rounded-xl" placeholder="APIキー" value={inputApiKey} onChange={(e)=>setInputApiKey(e.target.value)}/><button onClick={()=>{saveApiKey(inputApiKey);showToast('保存しました');}} className="w-full py-3 bg-purple-600 text-white rounded-xl font-bold flex items-center justify-center gap-2"><Save className="w-4 h-4"/>保存</button></div>:
         <><div className="mb-6 relative"><Search className="absolute left-3 top-3 text-gray-400 w-5 h-5"/><input type="text" placeholder="食品検索..." className="w-full pl-10 pr-4 py-3 bg-gray-50 border rounded-xl" value={searchTerm} onChange={(e)=>setSearchTerm(e.target.value)}/></div><div className="space-y-6">{Object.keys(filteredCategoryOptions).map(cat=><div key={cat}><h4 className="font-bold text-gray-800 mb-2">{CATEGORY_LABELS[cat]||cat}</h4><div className="grid grid-cols-2 gap-4">{filteredCategoryOptions[cat].map((i:string)=><div key={i} className="flex justify-between border-b pb-2"><span className="text-sm font-medium">{i}</span><input type="number" className="w-16 p-1 bg-gray-50 border rounded text-right" value={activeTab==='expiry'?expirySettings[i]||'':stockThresholds[i]||''} onChange={(e)=>activeTab==='expiry'?handleExpiryChange(i,Number(e.target.value)):handleStockChange(i,Number(e.target.value))}/></div>)}</div></div>)}</div><div className="mt-8 pt-4 border-t border-gray-100 flex justify-end"><button onClick={()=>showToast('設定を保存しました')} className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-xl font-bold shadow-md hover:bg-green-700 transition-colors"><Save className="w-5 h-5"/>設定を保存</button></div></>}
       </div>
     </div>
@@ -342,6 +348,7 @@ function AddItemForm({ onAdd, onCancel, categoryOptions, addCategoryOption, expi
     const currentName = isCustomCategory ? customCategoryName : data.categorySmall;
     if (currentName) {
       if (emojiHistory[currentName]) { setData((prev: any) => ({ ...prev, emoji: emojiHistory[currentName] })); return; }
+      const EMOJI_KEYWORDS: Record<string, string> = { '牛': '🥩', '豚': '🥩', '鶏': '🍗', '肉': '🥩', '魚': '🐟', '鮭': '🐟', '鯖': '🐟', '海老': '🦐', '牛乳': '🥛', '卵': '🥚', 'キャベツ': '🥬', 'レタス': '🥬', 'トマト': '🍅', '人参': '🥕', '玉ねぎ': '🧅', 'りんご': '🍎', 'みかん': '🍊', 'バナナ': '🍌', 'パン': '🍞', 'うどん': '🍜', 'カレー': '🍛', 'アイス': '🍨', 'チョコ': '🍫', '酒': '🍶', 'ビール': '🍺', '豆腐': '🧊', '納豆': '🥢' };
       for (const [key, emoji] of Object.entries(EMOJI_KEYWORDS)) { if (currentName.includes(key)) { setData((prev: any) => ({ ...prev, emoji: emoji })); break; } }
     } else if (data.category) {
       let defaultEmoji = '📦';
@@ -512,7 +519,10 @@ function RecipeGenerator({ items, onAddToShoppingList, history, onAddHistory, ap
                 <h4 className="font-bold text-gray-800 mb-3">👨‍🍳 作り方</h4>
                 <ul className="space-y-3">
                   {selectedRecipe.steps.map((step: string, idx: number) => (
-                    <li key={idx} className="flex gap-3 text-sm text-gray-600"><span className="flex-shrink-0 w-6 h-6 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center font-bold text-xs">{idx + 1}</span><span className="pt-0.5">{step}</span></li>
+                    <li key={idx} className="flex gap-3 text-sm text-gray-600">
+                      <span className="flex-shrink-0 w-6 h-6 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center font-bold text-xs">{idx + 1}</span>
+                      <span className="pt-0.5">{step}</span>
+                    </li>
                   ))}
                 </ul>
               </div>
