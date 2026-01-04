@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Check, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles } from 'lucide-react';
+import React, { useState, useEffect, useMemo, ChangeEvent } from 'react';
+import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles } from 'lucide-react';
 
 // --- 型定義 ---
 type StorageType = 'refrigerator' | 'freezer_main' | 'freezer_sub' | 'vegetable' | 'ambient';
@@ -43,9 +43,11 @@ const INITIAL_LOCATION_OPTIONS: Record<StorageType, string[]> = { refrigerator: 
 const DEFAULT_EXPIRY_DAYS: Record<string, number> = { '牛乳':7, '卵':14, '納豆':10, '豚肉':3, '牛肉':3, '鶏肉':2, 'キャベツ':7, 'レタス':4, 'トマト':5, '玉ねぎ':30, 'りんご':14 };
 const DEFAULT_STOCK_THRESHOLDS: Record<string, number> = { '卵':3, '牛乳':1, '納豆':1 };
 
-// --- コンポーネント実装 ---
+// --- アプリケーション本体 ---
 export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard'|'inventory'|'add'|'recipes'|'shopping'|'settings'>('dashboard');
+  
+  // データの永続化
   const [items, setItems] = useState<FoodItem[]>(() => loadFromStorage('sf_items', INITIAL_ITEMS));
   const [shoppingList, setShoppingList] = useState<ShoppingItem[]>(() => loadFromStorage('sf_shoppingList', INITIAL_SHOPPING_LIST));
   const [recipeHistory, setRecipeHistory] = useState<Recipe[]>(() => loadFromStorage('sf_recipeHistory', []));
@@ -194,6 +196,7 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
   const [filter, setFilter] = useState<StorageType | 'all'>('all');
   const [sortBy, setSortBy] = useState<'expiry' | 'added' | 'name'>('expiry');
   const [isGrouped, setIsGrouped] = useState(true);
+
   const displayItems = useMemo(() => {
     let baseItems = [...items];
     if (inventoryFilterMode === 'lowStock') {
@@ -202,6 +205,7 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
        const missingFoodItems: FoodItem[] = missingNames.map((name: string) => {
          let determinedEmoji = '📦';
          let determinedCategory: ItemCategory = 'other';
+         const EMOJI_KEYWORDS: Record<string, string> = { '牛': '🥩', '豚': '🥩', '鶏': '🍗', '肉': '🥩', '魚': '🐟', '野菜': '🥦', '果物': '🍎' };
          for (const [key, emoji] of Object.entries(EMOJI_KEYWORDS)) { if (name.includes(key)) { determinedEmoji = emoji; break; } }
          return { id: `temp-${name}`, name: name, storage: 'ambient', category: determinedCategory, categorySmall: name, location: '', expiryDate: '', quantity: 0, unit: '個', addedDate: '', emoji: determinedEmoji };
        });
@@ -209,12 +213,14 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
     }
     return baseItems;
   }, [items, inventoryFilterMode, lowStockItems]);
+
   const filteredItems = displayItems.filter((item: any) => {
     if (inventoryFilterMode === 'lowStock') { const key = item.categorySmall || item.name; return lowStockItems.includes(key); }
     if (inventoryFilterMode === 'expired') { const today = new Date().toISOString().split('T')[0]; return item.expiryDate < today && item.quantity > 0; }
     if (inventoryFilterMode === 'near') { const today = new Date().toISOString().split('T')[0]; const threeDaysLater = new Date(Date.now() + 259200000).toISOString().split('T')[0]; return item.expiryDate >= today && item.expiryDate <= threeDaysLater && item.quantity > 0; }
     return filter === 'all' ? true : item.storage === filter;
   });
+
   const getSortedItems = (itemsToSort: FoodItem[]) => {
     const sorted = [...itemsToSort];
     if (sortBy === 'expiry') sorted.sort((a, b) => { if (!a.expiryDate) return 1; if (!b.expiryDate) return -1; return a.expiryDate.localeCompare(b.expiryDate); });
@@ -222,8 +228,10 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
     else if (sortBy === 'name') sorted.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
     return sorted;
   };
+
   const filters: { id: StorageType | 'all', label: string, icon: any }[] = [{ id: 'all', label: 'すべて', icon: LayoutDashboard }, { id: 'refrigerator', label: '冷蔵室', icon: Refrigerator }, { id: 'vegetable', label: '野菜室', icon: Carrot }, { id: 'freezer_main', label: '冷凍(主)', icon: Snowflake }, { id: 'freezer_sub', label: '冷凍(副)', icon: IceCream }, { id: 'ambient', label: '常温', icon: Sun }];
   const modeTabs: { id: FilterMode, label: string, icon: any, color: string }[] = [{ id: 'all', label: 'すべて', icon: LayoutDashboard, color: 'bg-gray-100 text-gray-600' }, { id: 'expired', label: '期限切れ', icon: AlertTriangle, color: 'bg-red-100 text-red-600' }, { id: 'near', label: '期限近', icon: AlertOctagon, color: 'bg-yellow-100 text-yellow-600' }, { id: 'lowStock', label: '在庫少', icon: TrendingDown, color: 'bg-blue-100 text-blue-600' }];
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-4 gap-2 bg-white p-2 rounded-xl shadow-sm border border-gray-100">
@@ -658,13 +666,23 @@ function ScannerModal({ onClose, onScan, apiKey, categoryOptions, addCategoryOpt
     setScannedItems(newItems);
   };
 
+  const toggleSelectAll = () => {
+    const allSelected = scannedItems.every(i => i.isSelected);
+    setScannedItems(prev => prev.map(i => ({ ...i, isSelected: !allSelected })));
+  };
+
   if (showConfirm) {
     return (
       <div className="fixed inset-0 bg-black/80 z-50 flex flex-col items-center justify-center p-4">
         <div className="bg-white w-full max-w-md rounded-3xl overflow-hidden flex flex-col max-h-[90vh]">
           <div className="p-4 border-b border-gray-100 flex justify-between items-center">
             <h3 className="font-bold text-gray-800">スキャン結果の確認</h3>
-            <button onClick={onClose} className="p-1"><X className="w-5 h-5 text-gray-500" /></button>
+            <div className="flex items-center gap-2">
+               <button onClick={toggleSelectAll} className="text-xs text-blue-600 font-bold px-2 py-1 bg-blue-50 rounded">
+                 {scannedItems.every(i => i.isSelected) ? '全解除' : '全選択'}
+               </button>
+               <button onClick={onClose} className="p-1"><X className="w-5 h-5 text-gray-500" /></button>
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
             {scannedItems.map((item, index) => (
