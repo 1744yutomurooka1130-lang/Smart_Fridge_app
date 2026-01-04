@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Check, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles } from 'lucide-react';
+import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Check, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles, Scan } from 'lucide-react';
 
 // --- 型定義 ---
 type StorageType = 'refrigerator' | 'freezer_main' | 'freezer_sub' | 'vegetable' | 'ambient';
@@ -11,7 +11,8 @@ interface RecipeMaterial { name: string; amount: number | string; unit: string; 
 interface Recipe { id: string; title: string; time: string; ingredients: RecipeMaterial[]; missing: RecipeMaterial[]; desc: string; mode: 'auto' | 'custom'; createdAt: string; userRequest?: string; allMaterials: RecipeMaterial[]; }
 
 // --- 定数 ---
-const GEMINI_MODEL = "gemini-2.0-flash-exp"; 
+// 安定稼働のため gemini-1.5-flash を採用
+const GEMINI_MODEL = "gemini-1.5-flash"; 
 
 // --- ヘルパー関数 ---
 const formatAmountStr = (amount: number | string, unit: string) => { const nonNumericUnits = ['少々', '適量', 'お好みで', 'ひとつまみ', '適宜']; return nonNumericUnits.includes(unit) ? unit : `${amount}${unit}`; };
@@ -27,39 +28,57 @@ const loadFromStorage = <T,>(key: string, initialValue: T): T => {
   try {
     const item = window.localStorage.getItem(key);
     return item ? JSON.parse(item) : initialValue;
-  } catch (error) {
-    console.error(error);
-    return initialValue;
+  } catch (error) { console.error(error); return initialValue; }
+};
+
+// ★APIリトライ用共通関数（指数バックオフ）
+const callGeminiWithRetry = async (apiKey: string, payload: any, retries = 3, delay = 2000): Promise<any> => {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (response.ok) {
+        return await response.json();
+      }
+
+      // 429 (Too Many Requests) または 503 (Service Unavailable) の場合
+      if ((response.status === 429 || response.status === 503) && i < retries) {
+        console.warn(`API Error ${response.status}. Retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        delay *= 2; // 待機時間を倍にする
+        continue;
+      }
+
+      throw new Error(`Gemini API Error: ${response.status} ${response.statusText}`);
+    } catch (error) {
+      if (i === retries) throw error;
+      console.warn(`Network Error. Retrying in ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      delay *= 2;
+    }
   }
 };
 
 // --- 初期データ（圧縮） ---
-const INITIAL_ITEMS: FoodItem[] = [
-  { id: '1', name: '牛乳', storage: 'refrigerator', category: 'dairy', categorySmall: '牛乳', location: 'ドアポケット', expiryDate: new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0], quantity: 1, unit: '本', addedDate: '2023-10-25', emoji: '🥛' },
-  { id: '2', name: '卵', storage: 'refrigerator', category: 'egg', categorySmall: '卵', location: '上段', expiryDate: new Date(Date.now() + 86400000 * 5).toISOString().split('T')[0], quantity: 2, unit: '個', addedDate: '2023-10-20', emoji: '🥚' },
-  { id: '3', name: '豚バラ肉', storage: 'freezer_main', category: 'meat', categorySmall: '豚肉', location: '上段トレー', expiryDate: new Date(Date.now() + 86400000 * 20).toISOString().split('T')[0], quantity: 200, unit: 'g', addedDate: '2023-10-15', emoji: '🥩' },
-];
+const INITIAL_ITEMS: FoodItem[] = [{ id: '1', name: '牛乳', storage: 'refrigerator', category: 'dairy', categorySmall: '牛乳', location: 'ドアポケット', expiryDate: new Date(Date.now() + 172800000).toISOString().split('T')[0], quantity: 1, unit: '本', addedDate: '2023-10-25', emoji: '🥛' }];
 const INITIAL_SHOPPING_LIST: ShoppingItem[] = [{ id: 's1', name: '醤油', quantity: 1, unit: '本', isChecked: false, addedDate: '2023-10-25' }];
 const INITIAL_UNIT_OPTIONS = ['個', '本', 'g', 'kg', 'ml', 'L', 'パック', '玉', '袋', '束', '枚', '切れ', '缶', '瓶', '箱', '少々', '適量'];
-const EMOJI_LIBRARY: Record<string, string[]> = {
-  '野菜・果物': ['🥦','🥬','🥒','🌽','🥕','🥔','🍠','🍆','🍅','🍄','🧅','🧄','🥗','🌶️','🫑','🥑','🍎','🍏','🍐','🍊','🍋','🍌','🍉','🍇','🍓','🫐','🍈','🍒','🍑','🥭','🍍','🥥','🥝','🫒','🥜','🌰','🫘','🌿','🌾','🎋','🍃','🍂','🍁','🎍','🪵','🌵','☘️','🌱','🪴','🌻','🌹','🪷'],
-  '肉・魚・卵': ['🥩','🍗','🥓','🍖','🍔','🌭','🐟','🐠','🐡','🦐','🦞','🦀','🦑','🐙','🍣','🍱','🥚','🍳','🦈','🐳','🐋','🐬','🦪','🍥','🍤','🦃','🐓','🐖','🐄','🐂','🐃','🐑','🐐','🦌','🐗'],
-  '乳製品・飲料': ['🥛','🧀','🧈','🍦','🍮','🍼','🍵','☕','🧃','🥤','🍺','🍷','🍶','🥃','🍸','🧉','🍾','🥂','🍻','🧊','🫖','🍹','🩸','💧','🥣','🫙'],
-  '穀物・麺類': ['🍚','🍙','🍛','🍜','🍝','🍞','🥐','🥖','🥨','🥯','🥞','🧇','🍟','🍕','🌮','🌯','🥡','🥪','🫓','🥟','🥠','🍘','🍠','🍢','🍡','🥘','🍲','🫕','🥙','🧆','🍔','🌭'],
-  'スイーツ・調味料': ['🍫','🍬','🍭','🍡','🍩','🍪','🍰','🧁','🍯','🧂','🥢','🥄','🍧','🍨','🥧','🎂','🍮','🥞','🧇','🥮','🍿','🫙','🏺'],
-  'その他': ['📦','🍱','🥡','🥫','🛍️','🛒','🎁','🍽️','🍴','🔪','🔥','❄️','⚡','🧺','🧻','🧼','🧽','🧹','🗑️','💊','🩹','🌡️','🧸','🎈','🎉']
-};
-const EMOJI_KEYWORDS: Record<string, string> = { '牛': '🥩', '豚': '🥩', '鶏': '🍗', '肉': '🥩', 'ハム': '🥩', 'ソーセージ': '🌭', 'ベーコン': '🥓', 'ミンチ': '🥩', 'ステーキ': '🥩', '焼肉': '🥩', '魚': '🐟', '鮭': '🐟', '鯖': '🐟', '鯵': '🐟', '鰯': '🐟', '鮪': '🐟', '刺身': '🐟', '切り身': '🐟', 'エビ': '🦐', '海老': '🦐', 'カニ': '🦀', '蟹': '🦀', 'イカ': '🦑', 'タコ': '🐙', '貝': '🦪', 'あさり': '🦪', 'しじみ': '🦪', '牛乳': '🥛', 'ミルク': '🥛', '豆乳': '🧃', '乳飲料': '🧃', 'ヨーグルト': '🥣', 'のむヨーグルト': '🧃', 'カップヨーグルト': '🥣', 'チーズ': '🧀', 'バター': '🧈', 'マーガリン': '🧈', 'クリーム': '🧁', '卵': '🥚', 'たまご': '🥚', '玉子': '🥚', 'うずら': '🥚', 'キャベツ': '🥬', 'レタス': '🥬', '白菜': '🥬', 'ほうれん草': '🥬', '小松菜': '🥬', '青梗菜': '🥬', 'ニラ': '🥬', '春菊': '🥬', 'トマト': '🍅', 'ミニトマト': '🍅', 'なす': '🍆', 'ナス': '🍆', 'ピーマン': '🫑', 'パプリカ': '🫑', 'とうもろこし': '🌽', 'コーン': '🌽', 'きゅうり': '🥒', 'ブロッコリー': '🥦', 'カリフラワー': '🥦', 'アボカド': '🥑', 'アスパラ': '🎍', '芋': '🥔', 'ポテト': '🥔', 'じゃがいも': '🥔', 'さつまいも': '🍠', '里芋': '🥔', '長芋': '🥔', '人参': '🥕', 'にんじん': '🥕', '大根': '🥢', 'ごぼう': '🥢', 'レンコン': '🥢', '玉ねぎ': '🧅', 'タマネギ': '🧅', 'ネギ': '🧅', 'ねぎ': '🧅', 'ニンニク': '🧄', 'しょうが': '🫚', 'きのこ': '🍄', 'マッシュルーム': '🍄', 'しめじ': '🍄', '舞茸': '🍄', 'エリンギ': '🍄', '椎茸': '🍄', 'えのき': '🍄', 'りんご': '🍎', 'リンゴ': '🍎', '青りんご': '🍏', 'みかん': '🍊', 'オレンジ': '🍊', 'グレープフルーツ': '🍊', 'レモン': '🍋', 'ゆず': '🍋', 'バナナ': '🍌', 'ぶどう': '🍇', 'マスカット': '🍇', 'いちご': '🍓', 'メロン': '🍈', 'スイカ': '🍉', '桃': '🍑', 'さくらんぼ': '🍒', '梨': '🍐', 'パイナップル': '🍍', 'マンゴー': '🥭', 'キウイ': '🥝', 'ご飯': '🍚', '米': '🍚', 'おにぎり': '🍙', 'パン': '🍞', '食パン': '🍞', 'ロールパン': '🥐', 'クロワッサン': '🥐', 'バゲット': '🥖', 'フランスパン': '🥖', 'サンドイッチ': '🥪', 'ハンバーガー': '🍔', 'ピザ': '🍕', '中華まん': '🥟', '肉まん': '🥟', 'うどん': '🍜', 'そば': '🍜', 'ラーメン': '🍜', 'パスタ': '🍝', 'スパゲッティ': '🍝', '麺': '🍜', '焼きそば': '🥡', 'カレー': '🍛', 'シチュー': '🍲', '鍋': '🍲', 'スープ': '🥣', '味噌汁': '🥣', '弁当': '🍱', '寿司': '🍣', 'アイス': '🍨', 'ソフトクリーム': '🍦', 'チョコ': '🍫', 'クッキー': '🍪', 'ケーキ': '🍰', 'プリン': '🍮', 'ゼリー': '🍮', '団子': '🍡', '大福': '🍡', '和菓子': '🍵', 'ドーナツ': '🍩', 'キャンディ': '🍬', 'スナック': '🍿', 'ポテチ': '🥔', '酒': '🍶', 'ビール': '🍺', '発泡酒': '🍺', 'ワイン': '🍷', 'シャンパン': '🍾', 'チューハイ': '🍹', 'サワー': '🍹', 'ハイボール': '🥃', 'ウイスキー': '🥃', '焼酎': '🍶', '日本酒': '🍶', 'ジュース': '🧃', 'コーラ': '🥤', 'サイダー': '🥤', 'コーヒー': '☕', '珈琲': '☕', 'お茶': '🍵', '紅茶': '🫖', '水': '💧', 'ミネラルウォーター': '💧', '炭酸水': '💧', '塩': '🧂', '砂糖': '🫙', '醤油': '🫙', 'ソース': '🫙', 'マヨネーズ': '🫙', 'ケチャップ': '🫙', 'ドレッシング': '🫙', '油': '🫗', 'だし': '🍲', '豆腐': '🧊', '納豆': '🥢', 'こんにゃく': '🧊', 'ちくわ': '🥢', 'かまぼこ': '🍥', '缶詰': '🥫', 'ジャム': '🫙' };
+const EMOJI_KEYWORDS: Record<string, string> = { '牛': '🥩', '豚': '🥩', '鶏': '🍗', '肉': '🥩', '魚': '🐟', '鮭': '🐟', '鯖': '🐟', '海老': '🦐', '牛乳': '🥛', '卵': '🥚', 'キャベツ': '🥬', 'レタス': '🥬', 'トマト': '🍅', '人参': '🥕', '玉ねぎ': '🧅', 'りんご': '🍎', 'みかん': '🍊', 'バナナ': '🍌', 'パン': '🍞', 'うどん': '🍜', 'カレー': '🍛', 'アイス': '🍨', 'チョコ': '🍫', '酒': '🍶', 'ビール': '🍺', '豆腐': '🧊', '納豆': '🥢' };
+const EMOJI_LIBRARY: Record<string, string[]> = { '野菜・果物': ['🥦','🥬','🥒','🌽','🥕','🥔','🍅','🍆','🧅','🍎','🍊','🍌','🍇','🍓','🍑','🍍','🥝'], '肉・魚・卵': ['🥩','🍗','🥓','🍖','🍔','🐟','🐠','🦐','🦀','🦑','🍣','🥚','🍳'], '乳製品・飲料': ['🥛','🧀','🧈','🍦','🍵','☕','🧃','🥤','🍺','🍷'], '穀物・麺類': ['🍚','🍙','🍜','🍝','🍞','🥐','🥪','🍕'], 'その他': ['🍱','🥫','🥢','🍫','🍬','🍮','🧂','🥡'] };
 const CATEGORY_LABELS: Record<string, string> = { dairy: '🥛 乳製品', egg: '🥚 卵', meat: '🥩 肉類', fish: '🐟 魚介', vegetable: '🥦 野菜', fruit: '🍎 果物', other: '🥫 その他' };
-const INITIAL_CATEGORY_OPTIONS: Record<ItemCategory, string[]> = { dairy: ['牛乳', 'ヨーグルト', 'チーズ', 'バター', '生クリーム'], egg: ['卵', 'うずらの卵', '温泉卵'], meat: ['豚肉', '牛肉', '鶏肉', 'ハム', 'ソーセージ'], fish: ['鮭', 'サバ', 'ブリ', '刺身'], vegetable: ['キャベツ', '人参', '玉ねぎ', 'トマト', 'レタス', 'じゃがいも', 'きゅうり'], fruit: ['りんご', 'バナナ', 'みかん', 'レモン', 'いちご'], other: ['冷凍うどん', 'アイス', '豆腐', '納豆'] };
-const INITIAL_LOCATION_OPTIONS: Record<StorageType, string[]> = { refrigerator: ['ドアポケット', '上段', '中段', '下段', 'チルドルーム', '低温スペース'], freezer_main: ['上段トレー', '下段引き出し'], freezer_sub: ['製氷室横'], vegetable: ['上段トレイ', '下段'], ambient: ['パントリー', 'キッチン棚', 'カゴ', '床下収納'] };
-const DEFAULT_EXPIRY_DAYS: Record<string, number> = { '牛乳': 7, '卵': 14, '納豆': 10, 'ヨーグルト': 14, '豚肉': 3, '牛肉': 3, '鶏肉': 2, 'ハム': 10, 'キャベツ': 7, 'レタス': 4, 'トマト': 5, '冷凍うどん': 30, 'アイス': 90, '玉ねぎ': 30, 'りんご': 14, 'バナナ': 4, 'みかん': 7 };
-const DEFAULT_STOCK_THRESHOLDS: Record<string, number> = { '卵': 3, '牛乳': 1, '納豆': 1, '玉ねぎ': 1, '人参': 1 };
+const INITIAL_CATEGORY_OPTIONS: Record<ItemCategory, string[]> = { dairy: ['牛乳','ヨーグルト','チーズ'], egg: ['卵'], meat: ['豚肉','牛肉','鶏肉','ハム'], fish: ['鮭','サバ'], vegetable: ['キャベツ','人参','玉ねぎ','トマト'], fruit: ['りんご','バナナ','みかん'], other: ['豆腐','納豆'] };
+const INITIAL_LOCATION_OPTIONS: Record<StorageType, string[]> = { refrigerator: ['ドアポケット','上段','中段'], freezer_main: ['上段','下段'], freezer_sub: ['製氷室横'], vegetable: ['上段','下段'], ambient: ['棚','カゴ'] };
+const DEFAULT_EXPIRY_DAYS: Record<string, number> = { '牛乳':7, '卵':14, '納豆':10, '豚肉':3, '牛肉':3, '鶏肉':2, 'キャベツ':7, 'レタス':4, 'トマト':5, '玉ねぎ':30, 'りんご':14 };
+const DEFAULT_STOCK_THRESHOLDS: Record<string, number> = { '卵':3, '牛乳':1, '納豆':1 };
 
-// --- コンポーネント実装 ---
-
+// --- アプリケーション本体 ---
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'inventory' | 'add' | 'recipes' | 'shopping' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard'|'inventory'|'add'|'recipes'|'shopping'|'settings'>('dashboard');
   
   // データの永続化
   const [items, setItems] = useState<FoodItem[]>(() => loadFromStorage('sf_items', INITIAL_ITEMS));
@@ -99,16 +118,8 @@ export default function App() {
     if (savedKey) setGeminiApiKey(savedKey);
   }, []);
 
-  const saveApiKey = (key: string) => {
-    setGeminiApiKey(key);
-    localStorage.setItem('GEMINI_API_KEY', key);
-    showToast('APIキーを保存しました');
-  };
-
-  const showToast = (msg: string) => {
-    setNotification(msg);
-    setTimeout(() => setNotification(null), 3000);
-  };
+  const saveApiKey = (key: string) => { setGeminiApiKey(key); localStorage.setItem('GEMINI_API_KEY', key); showToast('APIキーを保存しました'); };
+  const showToast = (msg: string) => { setNotification(msg); setTimeout(() => setNotification(null), 3000); };
 
   const addCategoryOption = (category: ItemCategory, newOption: string) => {
     setCategoryOptions((prev: any) => {
@@ -116,188 +127,61 @@ export default function App() {
       return !currentOptions.includes(newOption) ? { ...prev, [category]: [...currentOptions, newOption] } : prev;
     });
   };
-
   const addLocationOption = (storage: StorageType, newOption: string) => {
     setLocationOptions((prev: any) => {
       const currentOptions = prev[storage] || [];
       return !currentOptions.includes(newOption) ? { ...prev, [storage]: [...currentOptions, newOption] } : prev;
     });
   };
-
-  const addUnitOption = (newUnit: string) => {
-    setUnitOptions(prev => !prev.includes(newUnit) ? [...prev, newUnit] : prev);
-  };
-
-  const updateEmojiHistory = (name: string, emoji: string) => {
-    setEmojiHistory(prev => ({ ...prev, [name]: emoji }));
-  };
-
-  const addRecipeToHistory = (recipe: Recipe) => {
-    setRecipeHistory(prev => [recipe, ...prev]);
-  };
+  const addUnitOption = (newUnit: string) => { setUnitOptions(prev => !prev.includes(newUnit) ? [...prev, newUnit] : prev); };
+  const updateEmojiHistory = (name: string, emoji: string) => { setEmojiHistory(prev => ({ ...prev, [name]: emoji })); };
+  const addRecipeToHistory = (recipe: Recipe) => { setRecipeHistory(prev => [recipe, ...prev]); };
 
   const addToShoppingList = (itemName: string, quantity: number = 1, unit: string = '個') => {
     setShoppingList(prev => {
-      if (prev.some(item => item.name === itemName)) {
-        showToast(`${itemName} は既にリストにあります`);
-        return prev;
-      }
-      return [...prev, {
-        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-        name: itemName, quantity, unit, isChecked: false, addedDate: new Date().toISOString().split('T')[0]
-      }];
+      if (prev.some(item => item.name === itemName)) { showToast(`${itemName} は既にリストにあります`); return prev; }
+      return [...prev, { id: Date.now().toString(), name: itemName, quantity, unit, isChecked: false, addedDate: new Date().toISOString().split('T')[0] }];
     });
     showToast(`${itemName} を買い物リストに追加しました`);
   };
 
-  const toggleShoppingItem = (id: string) => {
-    setShoppingList(prev => prev.map(item => item.id === id ? { ...item, isChecked: !item.isChecked } : item));
-  };
-
-  const deleteShoppingItem = (id: string) => {
-    setShoppingList(prev => prev.filter(item => item.id !== id));
-  };
-
-  const updateShoppingItemQuantity = (id: string, delta: number) => {
-    setShoppingList(prev => prev.map(item => item.id === id ? { ...item, quantity: Math.max(1, item.quantity + delta) } : item));
-  };
+  const toggleShoppingItem = (id: string) => { setShoppingList(prev => prev.map(item => item.id === id ? { ...item, isChecked: !item.isChecked } : item)); };
+  const deleteShoppingItem = (id: string) => { setShoppingList(prev => prev.filter(item => item.id !== id)); };
+  const updateShoppingItemQuantity = (id: string, delta: number) => { setShoppingList(prev => prev.map(item => item.id === id ? { ...item, quantity: Math.max(1, item.quantity + delta) } : item)); };
 
   const lowStockItems = useMemo(() => {
     const groupedStock: Record<string, number> = {};
     items.forEach(item => { const key = item.categorySmall || item.name; groupedStock[key] = (groupedStock[key] || 0) + item.quantity; });
     const lowStockList: string[] = [];
-    Object.keys(stockThresholds).forEach(key => {
-      const threshold = stockThresholds[key];
-      if (typeof threshold === 'number' && threshold > 0 && (groupedStock[key] || 0) < threshold) lowStockList.push(key);
-    });
+    Object.keys(stockThresholds).forEach(key => { if ((groupedStock[key] || 0) < stockThresholds[key]) lowStockList.push(key); });
     return lowStockList;
   }, [items, stockThresholds]);
 
   const statusCounts = useMemo(() => {
     const today = new Date().toISOString().split('T')[0];
-    const threeDaysLater = new Date(Date.now() + 86400000 * 3).toISOString().split('T')[0];
-    let expired = 0; let warning = 0;
-    items.forEach(item => {
-      if (item.expiryDate < today) expired++;
-      else if (item.expiryDate <= threeDaysLater) warning++;
-    });
+    const threeDaysLater = new Date(Date.now() + 259200000).toISOString().split('T')[0];
+    let expired = 0, warning = 0;
+    items.forEach(item => { if (item.expiryDate < today) expired++; else if (item.expiryDate <= threeDaysLater) warning++; });
     return { expired, warning, total: items.length, lowStock: lowStockItems.length };
   }, [items, lowStockItems]);
 
-  const deleteItem = (id: string) => {
-    setItems(items.filter(i => i.id !== id));
-    showToast('商品を削除しました');
-  };
-
-  const exportToKeep = () => {
-    const text = shoppingList.filter(i => !i.isChecked).map(i => `・${i.name} ${formatAmountStr(i.quantity, i.unit)}`).join('\n');
-    console.log(text);
-    showToast('Google Keepのリストに追加しました (Demo)');
-  };
+  const deleteItem = (id: string) => { setItems(items.filter(i => i.id !== id)); showToast('商品を削除しました'); };
+  const exportToKeep = () => { console.log(shoppingList.filter(i => !i.isChecked).map(i => `・${i.name} ${formatAmountStr(i.quantity, i.unit)}`).join('\n')); showToast('Google Keepのリストに追加しました (Demo)'); };
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800 font-sans pb-20 md:pb-0 md:pl-64">
       <Navigation activeTab={activeTab} setActiveTab={setActiveTab} counts={statusCounts} />
-
       <main className="p-4 max-w-4xl mx-auto">
         <Header activeTab={activeTab} setShowScannerModal={setShowScannerModal} />
-        
-        {notification && (
-          <div className="fixed top-4 right-4 bg-gray-900 text-white px-4 py-2 rounded-lg shadow-lg z-50 animate-fade-in-down">
-            {notification}
-          </div>
-        )}
-
-        {activeTab === 'dashboard' && (
-          <Dashboard 
-            items={items} 
-            counts={statusCounts} 
-            setActiveTab={setActiveTab}
-            setInventoryFilterMode={setInventoryFilterMode} 
-          />
-        )}
-        {activeTab === 'inventory' && (
-          <InventoryList 
-            items={items} 
-            deleteItem={deleteItem} 
-            onAddToShoppingList={addToShoppingList}
-            lowStockItems={lowStockItems}
-            stockThresholds={stockThresholds} 
-            inventoryFilterMode={inventoryFilterMode} 
-            setInventoryFilterMode={setInventoryFilterMode} 
-          />
-        )}
-        {activeTab === 'add' && (
-          <AddItemForm 
-            categoryOptions={categoryOptions}
-            addCategoryOption={addCategoryOption}
-            locationOptions={locationOptions} 
-            addLocationOption={addLocationOption} 
-            unitOptions={unitOptions} 
-            addUnitOption={addUnitOption} 
-            expirySettings={expirySettings}
-            emojiHistory={emojiHistory} 
-            updateEmojiHistory={updateEmojiHistory}
-            onAdd={(newItem: FoodItem) => {
-              setItems([...items, newItem]);
-              showToast(`${newItem.name} を追加しました`);
-              setActiveTab('inventory');
-            }} 
-            onCancel={() => setActiveTab('dashboard')}
-          />
-        )}
-        {activeTab === 'recipes' && (
-          <RecipeGenerator 
-            items={items} 
-            onAddToShoppingList={addToShoppingList}
-            history={recipeHistory} 
-            onAddHistory={addRecipeToHistory} 
-            apiKey={geminiApiKey} 
-          />
-        )}
-        {activeTab === 'shopping' && (
-          <ShoppingList 
-            items={shoppingList}
-            onToggle={toggleShoppingItem}
-            onDelete={deleteShoppingItem}
-            onAdd={addToShoppingList}
-            onUpdateQuantity={updateShoppingItemQuantity} 
-            onExport={exportToKeep}
-            unitOptions={unitOptions} 
-            addUnitOption={addUnitOption} 
-          />
-        )}
-        {activeTab === 'settings' && (
-          <SettingsScreen 
-            categoryOptions={categoryOptions}
-            expirySettings={expirySettings}
-            setExpirySettings={setExpirySettings}
-            stockThresholds={stockThresholds} 
-            setStockThresholds={setStockThresholds} 
-            showToast={showToast}
-            apiKey={geminiApiKey} 
-            saveApiKey={saveApiKey} 
-          />
-        )}
+        {notification && <div className="fixed top-4 right-4 bg-gray-900 text-white px-4 py-2 rounded-lg shadow-lg z-50 animate-fade-in-down">{notification}</div>}
+        {activeTab === 'dashboard' && <Dashboard items={items} counts={statusCounts} setActiveTab={setActiveTab} setInventoryFilterMode={setInventoryFilterMode} />}
+        {activeTab === 'inventory' && <InventoryList items={items} deleteItem={deleteItem} onAddToShoppingList={addToShoppingList} lowStockItems={lowStockItems} stockThresholds={stockThresholds} inventoryFilterMode={inventoryFilterMode} setInventoryFilterMode={setInventoryFilterMode} />}
+        {activeTab === 'add' && <AddItemForm categoryOptions={categoryOptions} addCategoryOption={addCategoryOption} locationOptions={locationOptions} addLocationOption={addLocationOption} unitOptions={unitOptions} addUnitOption={addUnitOption} expirySettings={expirySettings} emojiHistory={emojiHistory} updateEmojiHistory={updateEmojiHistory} onAdd={(newItem: FoodItem) => { setItems([...items, newItem]); showToast(`${newItem.name} を追加しました`); setActiveTab('inventory'); }} onCancel={() => setActiveTab('dashboard')} />}
+        {activeTab === 'recipes' && <RecipeGenerator items={items} onAddToShoppingList={addToShoppingList} history={recipeHistory} onAddHistory={addRecipeToHistory} apiKey={geminiApiKey} />}
+        {activeTab === 'shopping' && <ShoppingList items={shoppingList} onToggle={toggleShoppingItem} onDelete={deleteShoppingItem} onAdd={addToShoppingList} onUpdateQuantity={updateShoppingItemQuantity} onExport={exportToKeep} unitOptions={unitOptions} addUnitOption={addUnitOption} />}
+        {activeTab === 'settings' && <SettingsScreen categoryOptions={categoryOptions} expirySettings={expirySettings} setExpirySettings={setExpirySettings} stockThresholds={stockThresholds} setStockThresholds={setStockThresholds} showToast={showToast} apiKey={geminiApiKey} saveApiKey={saveApiKey} />}
       </main>
-
-      {showScannerModal && (
-        <ScannerModal 
-          onClose={() => setShowScannerModal(false)} 
-          onScan={(scannedItems: FoodItem[]) => { 
-            setItems([...items, ...scannedItems]); 
-            setShowScannerModal(false); 
-            showToast(`${scannedItems.length}件のアイテムを解析しました`); 
-          }} 
-          apiKey={geminiApiKey}
-          categoryOptions={categoryOptions}
-          addCategoryOption={addCategoryOption}
-          locationOptions={locationOptions}
-          addLocationOption={addLocationOption}
-          emojiHistory={emojiHistory}
-          expirySettings={expirySettings}
-        />
-      )}
+      {showScannerModal && <ScannerModal onClose={() => setShowScannerModal(false)} onScan={(scannedItems: FoodItem[]) => { setItems([...items, ...scannedItems]); setShowScannerModal(false); showToast(`${scannedItems.length}件のアイテムを解析しました`); }} apiKey={geminiApiKey} categoryOptions={categoryOptions} addCategoryOption={addCategoryOption} locationOptions={locationOptions} addLocationOption={addLocationOption} emojiHistory={emojiHistory} expirySettings={expirySettings} />}
     </div>
   );
 }
@@ -305,14 +189,7 @@ export default function App() {
 // --- Subcomponents ---
 
 function Navigation({ activeTab, setActiveTab, counts }: any) {
-  const tabs = [
-    { id: 'dashboard', icon: LayoutDashboard, label: 'ホーム' },
-    { id: 'inventory', icon: Refrigerator, label: '冷蔵庫' },
-    { id: 'add', icon: Plus, label: '追加', isAction: true },
-    { id: 'recipes', icon: ChefHat, label: 'レシピ' },
-    { id: 'shopping', icon: ShoppingCart, label: '買い物' },
-    { id: 'settings', icon: Settings, label: '設定' }, 
-  ];
+  const tabs = [ { id: 'dashboard', icon: LayoutDashboard, label: 'ホーム' }, { id: 'inventory', icon: Refrigerator, label: '冷蔵庫' }, { id: 'add', icon: Plus, label: '追加', isAction: true }, { id: 'recipes', icon: ChefHat, label: 'レシピ' }, { id: 'shopping', icon: ShoppingCart, label: '買い物' }, { id: 'settings', icon: Settings, label: '設定' }];
   return (
     <>
       <div className="hidden md:flex flex-col w-64 bg-white h-screen fixed left-0 top-0 border-r border-gray-200 shadow-sm z-10">
@@ -367,7 +244,7 @@ function Dashboard({ items, counts, setActiveTab, setInventoryFilterMode }: any)
 const ItemCard = ({ item, deleteItem, onAddToShoppingList, isLowStock, threshold }: { item: FoodItem, deleteItem: (id: string) => void, onAddToShoppingList: (name: string, quantity?: number, unit?: string) => void, isLowStock?: boolean, threshold?: number }) => {
   const getStatusColor = (dateStr: string, lowStock?: boolean, quantity?: number) => {
     const today = new Date().toISOString().split('T')[0];
-    const threeDays = new Date(Date.now() + 86400000 * 3).toISOString().split('T')[0];
+    const threeDays = new Date(Date.now() + 259200000).toISOString().split('T')[0];
     if (quantity === 0) return 'bg-gray-100 border-gray-300 text-gray-500';
     if (dateStr < today) return 'bg-red-50 border-red-200 text-red-800';
     if (dateStr <= threeDays) return 'bg-yellow-50 border-yellow-200 text-yellow-800';
@@ -419,7 +296,7 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
   const filteredItems = displayItems.filter((item: any) => {
     if (inventoryFilterMode === 'lowStock') { const key = item.categorySmall || item.name; return lowStockItems.includes(key); }
     if (inventoryFilterMode === 'expired') { const today = new Date().toISOString().split('T')[0]; return item.expiryDate < today && item.quantity > 0; }
-    if (inventoryFilterMode === 'near') { const today = new Date().toISOString().split('T')[0]; const threeDaysLater = new Date(Date.now() + 86400000 * 3).toISOString().split('T')[0]; return item.expiryDate >= today && item.expiryDate <= threeDaysLater && item.quantity > 0; }
+    if (inventoryFilterMode === 'near') { const today = new Date().toISOString().split('T')[0]; const threeDaysLater = new Date(Date.now() + 259200000).toISOString().split('T')[0]; return item.expiryDate >= today && item.expiryDate <= threeDaysLater && item.quantity > 0; }
     return filter === 'all' ? true : item.storage === filter;
   });
 
@@ -663,19 +540,43 @@ function RecipeGenerator({ items, onAddToShoppingList, history, onAddHistory, ap
   const [userRequest, setUserRequest] = useState('');
   const [selectedRecipe, setSelectedRecipe] = useState<any>(null);
 
+  // APIリトライ関数
+  const callGeminiWithRetry = async (payload: any, retries = 3, delay = 2000): Promise<any> => {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+    for (let i = 0; i <= retries; i++) {
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (response.ok) return await response.json();
+        if ((response.status === 429 || response.status === 503) && i < retries) {
+          console.warn(`API Error ${response.status}. Retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          delay *= 2;
+          continue;
+        }
+        throw new Error(`Gemini API Error: ${response.status}`);
+      } catch (error) {
+        if (i === retries) throw error;
+        await new Promise(resolve => setTimeout(resolve, delay));
+        delay *= 2;
+      }
+    }
+  };
+
   const generateRecipeWithGemini = async (mode: 'auto' | 'custom') => {
     setLoading(true);
     if (!apiKey) { alert("APIキーが設定されていません。設定画面でキーを入力してください。"); setLoading(false); return; }
+    
     const inventoryList = items.map((i: any) => `${i.name} (${i.quantity}${i.unit})`).join(', ');
+    
     let prompt = `あなたはプロのシェフです。以下の食材リストにあるものを使って、家庭で作れる美味しいレシピを1つ提案してください。\n\n【食材リスト】\n${inventoryList}\n\n【条件】\n- 可能な限りリストにある食材を使用してください。\n- 足りない調味料や食材があれば「不足している材料」として挙げてくだい。\n- 出力は以下のJSON形式のみで行ってください。余計な説明は不要です。\n\n【JSON形式】\n{\n  "title": "料理名",\n  "time": "調理時間（例：20分）",\n  "desc": "料理の簡単な説明と魅力（100文字程度）",\n  "ingredients": [\n    {"name": "食材名", "amount": "分量", "unit": "単位"} \n  ],\n  "missing": [\n     {"name": "不足食材名", "amount": "分量", "unit": "単位"}\n  ]\n}`;
     if (mode === 'custom' && userRequest) { prompt += `\n【ユーザーからの要望】\n${userRequest}\nこの要望を最大限反映してください。`; }
 
     try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-      });
-      const data = await response.json();
+      const data = await callGeminiWithRetry({ contents: [{ parts: [{ text: prompt }] }] });
       const text = data.candidates[0].content.parts[0].text;
       const jsonStr = text.match(/\{[\s\S]*\}/)[0];
       const recipeData = JSON.parse(jsonStr);
@@ -684,7 +585,7 @@ function RecipeGenerator({ items, onAddToShoppingList, history, onAddHistory, ap
       setSelectedRecipe(newRecipe);
     } catch (error) {
       console.error("Gemini API Error:", error);
-      alert("レシピの生成に失敗しました。APIキーを確認するか、しばらく待ってから試してください。");
+      alert("レシピの生成に失敗しました。時間をおいて再試行してください。");
     } finally {
       setLoading(false);
     }
@@ -774,6 +675,31 @@ function ScannerModal({ onClose, onScan, apiKey, categoryOptions, addCategoryOpt
   const [scanning, setScanning] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
 
+  // APIリトライ用関数
+  const callGeminiWithRetry = async (payload: any, retries = 3, delay = 2000): Promise<any> => {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+    for (let i = 0; i <= retries; i++) {
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (response.ok) return await response.json();
+        if ((response.status === 429 || response.status === 503) && i < retries) {
+          console.warn(`API Error ${response.status}. Retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          delay *= 2; continue;
+        }
+        throw new Error(`Gemini API Error: ${response.status}`);
+      } catch (error) {
+        if (i === retries) throw error;
+        await new Promise(resolve => setTimeout(resolve, delay));
+        delay *= 2;
+      }
+    }
+  };
+
   const handleReceiptCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const imageFile = e.target.files[0];
@@ -790,20 +716,15 @@ function ScannerModal({ onClose, onScan, apiKey, categoryOptions, addCategoryOpt
         const base64Image = await fileToBase64(imageFile);
         const prompt = `このレシート画像を解析し、購入された食品アイテムのリストを作成してください。以下のJSON形式のみを出力してください。賞味期限は、もしレシートに日付があればそこから適切に推測するか、食品の一般的な日持ちを考慮して今日からの日付（YYYY-MM-DD）を設定してください。\n\n{\n  "items": [\n    {\n      "name": "食品名",\n      "quantity": 数値（個数など）,\n      "unit": "単位（個、本、パックなど）",\n      "expiryDate": "YYYY-MM-DD",\n      "category": "dairy" | "egg" | "vegetable" | "fruit" | "meat" | "fish" | "other",\n      "emoji": "絵文字"\n    }\n  ]\n}`;
 
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{
-              parts: [
-                { text: prompt },
-                { inline_data: { mime_type: imageFile.type, data: base64Image } }
-              ]
-            }]
-          })
+        const data = await callGeminiWithRetry({
+          contents: [{
+            parts: [
+              { text: prompt },
+              { inline_data: { mime_type: imageFile.type, data: base64Image } }
+            ]
+          }]
         });
 
-        const data = await response.json();
         const text = data.candidates[0].content.parts[0].text;
         const jsonStr = text.match(/\{[\s\S]*\}/)[0];
         const result = JSON.parse(jsonStr);
@@ -822,7 +743,6 @@ function ScannerModal({ onClose, onScan, apiKey, categoryOptions, addCategoryOpt
           emoji: item.emoji || '📦'
         }));
 
-        // 設定データを活用するロジック（未使用変数エラー回避）
         scannedItems.forEach((item: FoodItem) => {
              const catOpts = categoryOptions[item.category] || [];
              if (!catOpts.includes(item.categorySmall)) addCategoryOption(item.category, item.categorySmall);
