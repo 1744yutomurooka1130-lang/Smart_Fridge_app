@@ -1,51 +1,50 @@
-import React, { useState, useEffect, useMemo, ChangeEvent } from 'react';
-import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Check, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles } from 'lucide-react';
-import Tesseract from 'tesseract.js';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles } from 'lucide-react';
 
 // --- 型定義 ---
-type StorageType = 'refrigerator'|'freezer_main'|'freezer_sub'|'vegetable'|'ambient';
-type ItemCategory = 'dairy'|'egg'|'vegetable'|'fruit'|'meat'|'fish'|'other';
-type FilterMode = 'all'|'expired'|'near'|'lowStock';
+type StorageType = 'refrigerator' | 'freezer_main' | 'freezer_sub' | 'vegetable' | 'ambient';
+type ItemCategory = 'dairy' | 'egg' | 'vegetable' | 'fruit' | 'meat' | 'fish' | 'other';
+type FilterMode = 'all' | 'expired' | 'near' | 'lowStock';
 interface FoodItem { id: string; name: string; storage: StorageType; category: ItemCategory; categorySmall: string; location: string; expiryDate: string; quantity: number; unit: string; addedDate: string; emoji: string; }
 interface ShoppingItem { id: string; name: string; quantity: number; unit: string; isChecked: boolean; addedDate: string; }
-interface RecipeMaterial { name: string; amount: number|string; unit: string; }
-interface Recipe { id: string; title: string; time: string; ingredients: RecipeMaterial[]; missing: RecipeMaterial[]; desc: string; steps?: string[]; mode: 'auto'|'custom'; createdAt: string; userRequest?: string; allMaterials: RecipeMaterial[]; }
+interface RecipeMaterial { name: string; amount: number | string; unit: string; }
+interface Recipe { id: string; title: string; time: string; ingredients: RecipeMaterial[]; missing: RecipeMaterial[]; desc: string; steps?: string[]; mode: 'auto' | 'custom'; createdAt: string; userRequest?: string; allMaterials: RecipeMaterial[]; }
 interface ScannedItem extends FoodItem { isSelected: boolean; }
 
 // --- 定数 ---
-const GEMINI_MODEL = "gemini-3-flash-preview"; 
+const GEMINI_MODEL = "gemini-1.5-flash"; 
 
-// --- ヘルパー ---
-const formatAmountStr = (amount: number|string, unit: string) => { const u=['少々','適量','お好みで','ひとつまみ','適宜']; return u.includes(unit)?unit:`${amount}${unit}`; };
+// --- ヘルパー関数 ---
+const formatAmountStr = (amount: number | string, unit: string) => { const nonNumericUnits = ['少々', '適量', 'お好みで', 'ひとつまみ', '適宜']; return nonNumericUnits.includes(unit) ? unit : `${amount}${unit}`; };
 const fileToBase64 = (file: File): Promise<string> => new Promise((resolve, reject) => { const reader = new FileReader(); reader.readAsDataURL(file); reader.onload = () => resolve((reader.result as string).split(',')[1]); reader.onerror = reject; });
 const loadFromStorage = <T,>(key: string, v: T): T => { try { const i = window.localStorage.getItem(key); return i ? JSON.parse(i) : v; } catch { return v; } };
 const callGeminiWithRetry = async (apiKey: string, payload: any, retries = 3, delay = 2000): Promise<any> => {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
-  for (let i=0; i<=retries; i++) {
+  for (let i = 0; i <= retries; i++) {
     try {
       const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       if (res.ok) return await res.json();
-      if ((res.status===429 || res.status===503) && i<retries) { await new Promise(r => setTimeout(r, delay)); delay *= 2; continue; }
+      if ((res.status === 429 || res.status === 503) && i < retries) { await new Promise(r => setTimeout(r, delay)); delay *= 2; continue; }
       throw new Error(`Gemini API Error: ${res.status}`);
-    } catch (e) { if (i===retries) throw e; await new Promise(r => setTimeout(r, delay)); delay *= 2; }
+    } catch (e) { if (i === retries) throw e; await new Promise(r => setTimeout(r, delay)); delay *= 2; }
   }
 };
 
-// --- データ (圧縮) ---
-const INITIAL_ITEMS: FoodItem[] = [{id:'1',name:'牛乳',storage:'refrigerator',category:'dairy',categorySmall:'牛乳',location:'ドアポケット',expiryDate:new Date(Date.now()+172800000).toISOString().split('T')[0],quantity:1,unit:'本',addedDate:'2023-10-25',emoji:'🥛'},{id:'2',name:'卵',storage:'refrigerator',category:'egg',categorySmall:'卵',location:'上段',expiryDate:new Date(Date.now()+432000000).toISOString().split('T')[0],quantity:2,unit:'個',addedDate:'2023-10-20',emoji:'🥚'},{id:'3',name:'豚バラ肉',storage:'freezer_main',category:'meat',categorySmall:'豚肉',location:'上段トレー',expiryDate:new Date(Date.now()+1728000000).toISOString().split('T')[0],quantity:200,unit:'g',addedDate:'2023-10-15',emoji:'🥩'}];
-const INITIAL_SHOPPING_LIST: ShoppingItem[] = [{id:'s1',name:'醤油',quantity:1,unit:'本',isChecked:false,addedDate:'2023-10-25'}];
-const INITIAL_UNIT_OPTIONS = ['個','本','g','kg','ml','L','パック','玉','袋','束','枚','切れ','缶','瓶','箱','少々','適量'];
-const EMOJI_LIBRARY: Record<string, string[]> = { '野菜・果物': ['🥦','🥬','🥒','🌽','🥕','🥔','🍅','🍆','🧅','🍎','🍊','🍌','🍇','🍓','🍑','🍍','🥝'], '肉・魚・卵': ['🥩','🍗','🥓','🍖','🍔','🐟','🐠','🦐','🦀','🦑','🍣','🥚','🍳'], '乳製品・飲料': ['🥛','🧀','🧈','🍦','🍵','☕','🧃','🥤','🍺','🍷'], '穀物・麺類': ['🍚','🍙','🍜','🍝','🍞','🥐','🥪','🍕'], 'その他': ['🍱','🥫','🥢','🍫','🍬','🍮','🧂','🥡'] };
-const EMOJI_KEYWORDS: Record<string, string> = { '牛':'🥩','豚':'🥩','鶏':'🍗','肉':'🥩','ハム':'🥩','魚':'🐟','鮭':'🐟','鯖':'🐟','海老':'🦐','牛乳':'🥛','卵':'🥚','キャベツ':'🥬','レタス':'🥬','トマト':'🍅','人参':'🥕','玉ねぎ':'🧅','りんご':'🍎','みかん':'🍊','バナナ':'🍌','パン':'🍞','うどん':'🍜','カレー':'🍛','アイス':'🍨','チョコ':'🍫','酒':'🍶','ビール':'🍺','豆腐':'🧊','納豆':'🥢' };
-const CATEGORY_LABELS: Record<string, string> = { dairy:'🥛 乳製品', egg:'🥚 卵', meat:'🥩 肉類', fish:'🐟 魚介', vegetable:'🥦 野菜', fruit:'🍎 果物', other:'🥫 その他' };
-const INITIAL_CATEGORY_OPTIONS: Record<ItemCategory, string[]> = { dairy:['牛乳','ヨーグルト','チーズ'], egg:['卵'], meat:['豚肉','牛肉','鶏肉','ハム'], fish:['鮭','サバ'], vegetable:['キャベツ','人参','玉ねぎ','トマト'], fruit:['りんご','バナナ','みかん'], other:['豆腐','納豆'] };
-const INITIAL_LOCATION_OPTIONS: Record<StorageType, string[]> = { refrigerator:['ドアポケット','上段','中段'], freezer_main:['上段','下段'], freezer_sub:['製氷室横'], vegetable:['上段','下段'], ambient:['棚','カゴ'] };
-const DEFAULT_EXPIRY_DAYS: Record<string, number> = { '牛乳':7, '卵':14, '納豆':10, '豚肉':3, '牛肉':3, '鶏肉':2, 'キャベツ':7, 'レタス':4, 'トマト':5, '玉ねぎ':30, 'りんご':14 };
-const DEFAULT_STOCK_THRESHOLDS: Record<string, number> = { '卵':3, '牛乳':1, '納豆':1 };
+// --- 初期データ（圧縮） ---
+const INITIAL_ITEMS: FoodItem[] = [{ id: '1', name: '牛乳', storage: 'refrigerator', category: 'dairy', categorySmall: '牛乳', location: 'ドアポケット', expiryDate: new Date(Date.now() + 172800000).toISOString().split('T')[0], quantity: 1, unit: '本', addedDate: '2023-10-25', emoji: '🥛' }, { id: '2', name: '卵', storage: 'refrigerator', category: 'egg', categorySmall: '卵', location: '上段', expiryDate: new Date(Date.now() + 432000000).toISOString().split('T')[0], quantity: 2, unit: '個', addedDate: '2023-10-20', emoji: '🥚' }, { id: '3', name: '豚バラ肉', storage: 'freezer_main', category: 'meat', categorySmall: '豚肉', location: '上段トレー', expiryDate: new Date(Date.now() + 1728000000).toISOString().split('T')[0], quantity: 200, unit: 'g', addedDate: '2023-10-15', emoji: '🥩' }];
+const INITIAL_SHOPPING_LIST: ShoppingItem[] = [{ id: 's1', name: '醤油', quantity: 1, unit: '本', isChecked: false, addedDate: '2023-10-25' }];
+const INITIAL_UNIT_OPTIONS = ['個', '本', 'g', 'kg', 'ml', 'L', 'パック', '玉', '袋', '束', '枚', '切れ', '缶', '瓶', '箱', '少々', '適量'];
+const EMOJI_KEYWORDS: Record<string, string> = { '牛': '🥩', '豚': '🥩', '鶏': '🍗', '肉': '🥩', 'ハム': '🥩', 'ソーセージ': '🌭', 'ベーコン': '🥓', '魚': '🐟', '鮭': '🐟', '鯖': '🐟', '牛乳': '🥛', '卵': '🥚', 'キャベツ': '🥬', 'レタス': '🥬', 'トマト': '🍅', '人参': '🥕', '玉ねぎ': '🧅', 'りんご': '🍎', 'みかん': '🍊', 'バナナ': '🍌', 'パン': '🍞', 'うどん': '🍜', 'カレー': '🍛', 'アイス': '🍨', 'チョコ': '🍫', '酒': '🍶', 'ビール': '🍺', '豆腐': '🧊', '納豆': '🥢' };
+const EMOJI_LIBRARY: Record<string, string[]> = { '野菜・果物': ['🥦', '🥬', '🥒', '🌽', '🥕', '🥔', '🍅', '🍆', '🧅', '🍎', '🍊', '🍌', '🍇', '🍓', '🍑', '🍍', '🥝'], '肉・魚・卵': ['🥩', '🍗', '🥓', '🍖', '🍔', '🐟', '🐠', '🦐', '🦀', '🦑', '🍣', '🥚', '🍳'], '乳製品・飲料': ['🥛', '🧀', '🧈', '🍦', '🍵', '☕', '🧃', '🥤', '🍺', '🍷'], '穀物・麺類': ['🍚', '🍙', '🍜', '🍝', '🍞', '🥐', '🥪', '🍕'], 'その他': ['🍱', '🥫', '🥢', '🍫', '🍬', '🍮', '🧂', '🥡'] };
+const CATEGORY_LABELS: Record<string, string> = { dairy: '🥛 乳製品', egg: '🥚 卵', meat: '🥩 肉類', fish: '🐟 魚介', vegetable: '🥦 野菜', fruit: '🍎 果物', other: '🥫 その他' };
+const INITIAL_CATEGORY_OPTIONS: Record<ItemCategory, string[]> = { dairy: ['牛乳', 'ヨーグルト', 'チーズ', 'バター', '生クリーム'], egg: ['卵', 'うずらの卵', '温泉卵'], meat: ['豚肉', '牛肉', '鶏肉', 'ハム', 'ソーセージ'], fish: ['鮭', 'サバ', 'ブリ', '刺身'], vegetable: ['キャベツ', '人参', '玉ねぎ', 'トマト', 'レタス', 'じゃがいも', 'きゅうり'], fruit: ['りんご', 'バナナ', 'みかん', 'レモン', 'いちご'], other: ['冷凍うどん', 'アイス', '豆腐', '納豆'] };
+const INITIAL_LOCATION_OPTIONS: Record<StorageType, string[]> = { refrigerator: ['ドアポケット', '上段', '中段', '下段', 'チルドルーム', '低温スペース'], freezer_main: ['上段トレー', '下段引き出し'], freezer_sub: ['製氷室横'], vegetable: ['上段トレイ', '下段'], ambient: ['パントリー', 'キッチン棚', 'カゴ', '床下収納'] };
+const DEFAULT_EXPIRY_DAYS: Record<string, number> = { '牛乳': 7, '卵': 14, '納豆': 10, '豚肉': 3, '牛肉': 3, '鶏肉': 2, 'キャベツ': 7, 'レタス': 4, 'トマト': 5, '玉ねぎ': 30, 'りんご': 14 };
+const DEFAULT_STOCK_THRESHOLDS: Record<string, number> = { '卵': 3, '牛乳': 1, '納豆': 1, '玉ねぎ': 1, '人参': 1 };
 
-// --- アプリ本体 ---
+// --- コンポーネント実装 ---
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard'|'inventory'|'add'|'recipes'|'shopping'|'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'inventory' | 'add' | 'recipes' | 'shopping' | 'settings'>('dashboard');
   
   // データの永続化
   const [items, setItems] = useState<FoodItem[]>(() => loadFromStorage('sf_items', INITIAL_ITEMS));
@@ -82,8 +81,8 @@ export default function App() {
   useEffect(() => { const savedKey = localStorage.getItem('GEMINI_API_KEY'); if (savedKey) setGeminiApiKey(savedKey); }, []);
   const saveApiKey = (key: string) => { setGeminiApiKey(key); localStorage.setItem('GEMINI_API_KEY', key); showToast('APIキーを保存しました'); };
   const showToast = (msg: string) => { setNotification(msg); setTimeout(() => setNotification(null), 3000); };
-  const addCategoryOption = (category: ItemCategory, newOption: string) => { setCategoryOptions((prev:any) => { const c=prev[category]||[]; return !c.includes(newOption) ? {...prev, [category]: [...c, newOption]} : prev; }); };
-  const addLocationOption = (storage: StorageType, newOption: string) => { setLocationOptions((prev:any) => { const c=prev[storage]||[]; return !c.includes(newOption) ? {...prev, [storage]: [...c, newOption]} : prev; }); };
+  const addCategoryOption = (category: ItemCategory, newOption: string) => { setCategoryOptions((prev: any) => { const c = prev[category] || []; return !c.includes(newOption) ? { ...prev, [category]: [...c, newOption] } : prev; }); };
+  const addLocationOption = (storage: StorageType, newOption: string) => { setLocationOptions((prev: any) => { const c = prev[storage] || []; return !c.includes(newOption) ? { ...prev, [storage]: [...c, newOption] } : prev; }); };
   const addUnitOption = (newUnit: string) => { setUnitOptions(prev => !prev.includes(newUnit) ? [...prev, newUnit] : prev); };
   const updateEmojiHistory = (name: string, emoji: string) => { setEmojiHistory(prev => ({ ...prev, [name]: emoji })); };
   const addRecipeToHistory = (recipe: Recipe) => { setRecipeHistory(prev => [recipe, ...prev]); };
@@ -102,9 +101,9 @@ export default function App() {
 
   const lowStockItems = useMemo(() => {
     const groupedStock: Record<string, number> = {};
-    items.forEach(item => { const key = item.categorySmall || item.name; g[k] = (g[k] || 0) + i.quantity; });
+    items.forEach(i => { const k = i.categorySmall || i.name; groupedStock[k] = (groupedStock[k] || 0) + i.quantity; });
     const lowStockList: string[] = [];
-    Object.keys(stockThresholds).forEach(key => { if ((groupedStock[key] || 0) < stockThresholds[key]) lowStockList.push(key); });
+    Object.keys(stockThresholds).forEach(k => { if ((groupedStock[k] || 0) < stockThresholds[k]) lowStockList.push(k); });
     return lowStockList;
   }, [items, stockThresholds]);
 
@@ -112,7 +111,7 @@ export default function App() {
     const today = new Date().toISOString().split('T')[0];
     const threeDaysLater = new Date(Date.now() + 259200000).toISOString().split('T')[0];
     let expired = 0, warning = 0;
-    items.forEach(item => { if (item.expiryDate < today) expired++; else if (item.expiryDate <= threeDaysLater) warning++; });
+    items.forEach(i => { if (i.expiryDate < today) expired++; else if (i.expiryDate <= threeDaysLater) warning++; });
     return { expired, warning, total: items.length, lowStock: lowStockItems.length };
   }, [items, lowStockItems]);
 
@@ -139,7 +138,7 @@ export default function App() {
 
 // --- Subcomponents ---
 function Navigation({ activeTab, setActiveTab, counts }: any) {
-  const tabs = [ { id: 'dashboard', icon: LayoutDashboard, label: 'ホーム' }, { id: 'inventory', icon: Refrigerator, label: '冷蔵庫' }, { id: 'add', icon: Plus, label: '追加', isAction: true }, { id: 'recipes', icon: ChefHat, label: 'レシピ' }, { id: 'shopping', icon: ShoppingCart, label: '買い物' }, { id: 'settings', icon: Settings, label: '設定' }];
+  const tabs = [{ id: 'dashboard', icon: LayoutDashboard, label: 'ホーム' }, { id: 'inventory', icon: Refrigerator, label: '冷蔵庫' }, { id: 'add', icon: Plus, label: '追加', isAction: true }, { id: 'recipes', icon: ChefHat, label: 'レシピ' }, { id: 'shopping', icon: ShoppingCart, label: '買い物' }, { id: 'settings', icon: Settings, label: '設定' }];
   return (
     <>
       <div className="hidden md:flex flex-col w-64 bg-white h-screen fixed left-0 top-0 border-r border-gray-200 shadow-sm z-10">
@@ -353,7 +352,7 @@ function AddItemForm({ onAdd, onCancel, categoryOptions, addCategoryOption, expi
     const currentName = isCustomCategory ? customCategoryName : data.categorySmall;
     if (currentName) {
       if (emojiHistory[currentName]) { setData((prev: any) => ({ ...prev, emoji: emojiHistory[currentName] })); return; }
-      // EMOJI_KEYWORDSは使用しない（圧縮のため削除）
+      for (const [key, emoji] of Object.entries(EMOJI_KEYWORDS)) { if (currentName.includes(key)) { setData((prev: any) => ({ ...prev, emoji: emoji })); break; } }
     } else if (data.category) {
       let defaultEmoji = '📦';
       if (data.category === 'dairy') defaultEmoji = '🥛'; else if (data.category === 'egg') defaultEmoji = '🥚'; else if (data.category === 'meat') defaultEmoji = '🥩'; else if (data.category === 'fish') defaultEmoji = '🐟'; else if (data.category === 'vegetable') defaultEmoji = '🥦'; else if (data.category === 'fruit') defaultEmoji = '🍎';
@@ -523,7 +522,10 @@ function RecipeGenerator({ items, onAddToShoppingList, history, onAddHistory, ap
                 <h4 className="font-bold text-gray-800 mb-3">👨‍🍳 作り方</h4>
                 <ul className="space-y-3">
                   {selectedRecipe.steps.map((step: string, idx: number) => (
-                    <li key={idx} className="flex gap-3 text-sm text-gray-600"><span className="flex-shrink-0 w-6 h-6 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center font-bold text-xs">{idx + 1}</span><span className="pt-0.5">{step}</span></li>
+                    <li key={idx} className="flex gap-3 text-sm text-gray-600">
+                      <span className="flex-shrink-0 w-6 h-6 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center font-bold text-xs">{idx + 1}</span>
+                      <span className="pt-0.5">{step}</span>
+                    </li>
                   ))}
                 </ul>
               </div>
