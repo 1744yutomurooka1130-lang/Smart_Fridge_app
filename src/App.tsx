@@ -12,7 +12,7 @@ interface Recipe { id: string; title: string; time: string; ingredients: RecipeM
 interface ScannedItem extends FoodItem { isSelected: boolean; }
 
 // --- 定数 ---
-const GEMINI_MODEL = "gemini-3-flash-preview"; 
+const GEMINI_MODEL = "gemini-1.5-flash"; 
 
 // --- ヘルパー関数 ---
 const formatAmountStr = (amount: number|string, unit: string) => { const u=['少々','適量','お好みで','ひとつまみ','適宜']; return u.includes(unit)?unit:`${amount}${unit}`; };
@@ -24,16 +24,16 @@ const callGeminiWithRetry = async (apiKey: string, payload: any, retries = 3, de
     try {
       const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       if (res.ok) return await res.json();
-      if ((res.status===429 || res.status===503) && i<retries) { await new Promise(r => setTimeout(r, delay)); delay *= 2; continue; }
+      if ((res.status === 429 || res.status === 503) && i < retries) { await new Promise(r => setTimeout(r, delay)); delay *= 2; continue; }
       throw new Error(`Gemini API Error: ${res.status}`);
     } catch (e) { if (i===retries) throw e; await new Promise(r => setTimeout(r, delay)); delay *= 2; }
   }
 };
 
-// --- 初期データ（圧縮・重複排除） ---
-const INITIAL_ITEMS: FoodItem[] = [{id:'1',name:'牛乳',storage:'refrigerator',category:'dairy',categorySmall:'牛乳',location:'ドアポケット',expiryDate:new Date(Date.now()+172800000).toISOString().split('T')[0],quantity:1,unit:'本',addedDate:'2023-10-25',emoji:'🥛'},{id:'2',name:'卵',storage:'refrigerator',category:'egg',categorySmall:'卵',location:'上段',expiryDate:new Date(Date.now()+432000000).toISOString().split('T')[0],quantity:2,unit:'個',addedDate:'2023-10-20',emoji:'🥚'},{id:'3',name:'豚バラ肉',storage:'freezer_main',category:'meat',categorySmall:'豚肉',location:'上段トレー',expiryDate:new Date(Date.now()+1728000000).toISOString().split('T')[0],quantity:200,unit:'g',addedDate:'2023-10-15',emoji:'🥩'}];
-const INITIAL_SHOPPING_LIST: ShoppingItem[] = [{id:'s1',name:'醤油',quantity:1,unit:'本',isChecked:false,addedDate:'2023-10-25'}];
-const INITIAL_UNIT_OPTIONS = ['個','本','g','kg','ml','L','パック','玉','袋','束','枚','切れ','缶','瓶','箱','少々','適量'];
+// --- 初期データ（圧縮） ---
+const INITIAL_ITEMS: FoodItem[] = [{ id: '1', name: '牛乳', storage: 'refrigerator', category: 'dairy', categorySmall: '牛乳', location: 'ドアポケット', expiryDate: new Date(Date.now() + 172800000).toISOString().split('T')[0], quantity: 1, unit: '本', addedDate: '2023-10-25', emoji: '🥛' }, { id: '2', name: '卵', storage: 'refrigerator', category: 'egg', categorySmall: '卵', location: '上段', expiryDate: new Date(Date.now() + 432000000).toISOString().split('T')[0], quantity: 2, unit: '個', addedDate: '2023-10-20', emoji: '🥚' }, { id: '3', name: '豚バラ肉', storage: 'freezer_main', category: 'meat', categorySmall: '豚肉', location: '上段トレー', expiryDate: new Date(Date.now() + 1728000000).toISOString().split('T')[0], quantity: 200, unit: 'g', addedDate: '2023-10-15', emoji: '🥩' }];
+const INITIAL_SHOPPING_LIST: ShoppingItem[] = [{ id: 's1', name: '醤油', quantity: 1, unit: '本', isChecked: false, addedDate: '2023-10-25' }];
+const INITIAL_UNIT_OPTIONS = ['個', '本', 'g', 'kg', 'ml', 'L', 'パック', '玉', '袋', '束', '枚', '切れ', '缶', '瓶', '箱', '少々', '適量'];
 const EMOJI_KEYWORDS: Record<string, string> = { '牛':'🥩','豚':'🥩','鶏':'🍗','肉':'🥩','ハム':'🥩','魚':'🐟','鮭':'🐟','鯖':'🐟','海老':'🦐','牛乳':'🥛','卵':'🥚','キャベツ':'🥬','レタス':'🥬','トマト':'🍅','人参':'🥕','玉ねぎ':'🧅','りんご':'🍎','みかん':'🍊','バナナ':'🍌','パン':'🍞','うどん':'🍜','カレー':'🍛','アイス':'🍨','チョコ':'🍫','酒':'🍶','ビール':'🍺','豆腐':'🧊','納豆':'🥢' };
 const EMOJI_LIBRARY: Record<string, string[]> = { '野菜・果物': ['🥦','🥬','🥒','🌽','🥕','🥔','🍅','🍆','🧅','🍎','🍊','🍌','🍇','🍓','🍑','🍍','🥝'], '肉・魚・卵': ['🥩','🍗','🥓','🍖','🍔','🐟','🐠','🦐','🦀','🦑','🍣','🥚','🍳'], '乳製品・飲料': ['🥛','🧀','🧈','🍦','🍵','☕','🧃','🥤','🍺','🍷'], '穀物・麺類': ['🍚','🍙','🍜','🍝','🍞','🥐','🥪','🍕'], 'その他': ['🍱','🥫','🥢','🍫','🍬','🍮','🧂','🥡'] };
 const CATEGORY_LABELS: Record<string, string> = { dairy:'🥛 乳製品', egg:'🥚 卵', meat:'🥩 肉類', fish:'🐟 魚介', vegetable:'🥦 野菜', fruit:'🍎 果物', other:'🥫 その他' };
@@ -45,8 +45,6 @@ const DEFAULT_STOCK_THRESHOLDS: Record<string, number> = { '卵':3, '牛乳':1, 
 // --- アプリ本体 ---
 export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard'|'inventory'|'add'|'recipes'|'shopping'|'settings'>('dashboard');
-  
-  // データの永続化
   const [items, setItems] = useState<FoodItem[]>(() => loadFromStorage('sf_items', INITIAL_ITEMS));
   const [shoppingList, setShoppingList] = useState<ShoppingItem[]>(() => loadFromStorage('sf_shoppingList', INITIAL_SHOPPING_LIST));
   const [recipeHistory, setRecipeHistory] = useState<Recipe[]>(() => loadFromStorage('sf_recipeHistory', []));
@@ -83,11 +81,24 @@ export default function App() {
   useEffect(() => { const savedKey = localStorage.getItem('GEMINI_API_KEY'); if (savedKey) setGeminiApiKey(savedKey); }, []);
   const saveApiKey = (key: string) => { setGeminiApiKey(key); localStorage.setItem('GEMINI_API_KEY', key); showToast('APIキーを保存しました'); };
   const showToast = (msg: string) => { setNotification(msg); setTimeout(() => setNotification(null), 3000); };
+  
   const addCategoryOption = (category: ItemCategory, newOption: string) => { setCategoryOptions((prev:any) => { const c=prev[category]||[]; return !c.includes(newOption) ? {...prev, [category]: [...c, newOption]} : prev; }); };
   const addLocationOption = (storage: StorageType, newOption: string) => { setLocationOptions((prev:any) => { const c=prev[storage]||[]; return !c.includes(newOption) ? {...prev, [storage]: [...c, newOption]} : prev; }); };
   const addUnitOption = (newUnit: string) => { setUnitOptions(prev => !prev.includes(newUnit) ? [...prev, newUnit] : prev); };
   const updateEmojiHistory = (name: string, emoji: string) => { setEmojiHistory(prev => ({ ...prev, [name]: emoji })); };
   const addRecipeToHistory = (recipe: Recipe) => { setRecipeHistory(prev => [recipe, ...prev]); };
+
+  // 新規追加: 設定からカテゴリ項目を削除する関数
+  const deleteCategoryOption = (category: string, itemName: string) => {
+    setCategoryOptions((prev: any) => {
+      const newOptions = { ...prev };
+      if (newOptions[category]) newOptions[category] = newOptions[category].filter((i: string) => i !== itemName);
+      return newOptions;
+    });
+    setExpirySettings((prev: any) => { const n = { ...prev }; delete n[itemName]; return n; });
+    setStockThresholds((prev: any) => { const n = { ...prev }; delete n[itemName]; return n; });
+    showToast(`${itemName} を削除しました`);
+  };
 
   const addToShoppingList = (itemName: string, quantity: number = 1, unit: string = '個') => {
     setShoppingList(prev => {
@@ -102,19 +113,19 @@ export default function App() {
   const updateShoppingItemQuantity = (id: string, delta: number) => { setShoppingList(prev => prev.map(item => item.id === id ? { ...item, quantity: Math.max(1, item.quantity + delta) } : item)); };
 
   const lowStockItems = useMemo(() => {
-    const groupedStock: Record<string, number> = {};
-    items.forEach(i => { const k = i.categorySmall || i.name; groupedStock[k] = (groupedStock[k] || 0) + i.quantity; });
-    const lowStockList: string[] = [];
-    Object.keys(stockThresholds).forEach(k => { if ((groupedStock[k] || 0) < stockThresholds[k]) lowStockList.push(k); });
-    return lowStockList;
+    const g: Record<string, number> = {};
+    items.forEach(i => { const k = i.categorySmall || i.name; g[k] = (g[k] || 0) + i.quantity; });
+    const l: string[] = [];
+    Object.keys(stockThresholds).forEach(k => { if ((g[k] || 0) < stockThresholds[k]) l.push(k); });
+    return l;
   }, [items, stockThresholds]);
 
   const statusCounts = useMemo(() => {
     const today = new Date().toISOString().split('T')[0];
-    const threeDaysLater = new Date(Date.now() + 259200000).toISOString().split('T')[0];
-    let expired = 0, warning = 0;
-    items.forEach(i => { if (i.expiryDate < today) expired++; else if (i.expiryDate <= threeDaysLater) warning++; });
-    return { expired, warning, total: items.length, lowStock: lowStockItems.length };
+    const d3 = new Date(Date.now() + 259200000).toISOString().split('T')[0];
+    let e=0, w=0;
+    items.forEach(i => { if (i.expiryDate < today) e++; else if (i.expiryDate <= d3) w++; });
+    return { expired: e, warning: w, total: items.length, lowStock: lowStockItems.length };
   }, [items, lowStockItems]);
 
   const deleteItem = (id: string) => { setItems(items.filter(i => i.id !== id)); showToast('商品を削除しました'); };
@@ -136,7 +147,7 @@ export default function App() {
         {activeTab==='add'&&<AddItemForm categoryOptions={categoryOptions} addCategoryOption={addCategoryOption} locationOptions={locationOptions} addLocationOption={addLocationOption} unitOptions={unitOptions} addUnitOption={addUnitOption} expirySettings={expirySettings} emojiHistory={emojiHistory} updateEmojiHistory={updateEmojiHistory} onAdd={(n:FoodItem)=>{setItems([...items,n]);showToast('追加しました');setActiveTab('inventory');}} onCancel={()=>setActiveTab('dashboard')}/>}
         {activeTab==='recipes'&&<RecipeGenerator items={items} onAddToShoppingList={addToShoppingList} history={recipeHistory} onAddHistory={addRecipeToHistory} apiKey={geminiApiKey}/>}
         {activeTab==='shopping'&&<ShoppingList items={shoppingList} onToggle={toggleShoppingItem} onDelete={deleteShoppingItem} onAdd={addToShoppingList} onUpdateQuantity={updateShoppingItemQuantity} onExport={exportToKeep} unitOptions={unitOptions} addUnitOption={addUnitOption}/>}
-        {activeTab==='settings'&&<SettingsScreen categoryOptions={categoryOptions} expirySettings={expirySettings} setExpirySettings={setExpirySettings} stockThresholds={stockThresholds} setStockThresholds={setStockThresholds} showToast={showToast} apiKey={geminiApiKey} saveApiKey={saveApiKey}/>}
+        {activeTab==='settings'&&<SettingsScreen categoryOptions={categoryOptions} expirySettings={expirySettings} setExpirySettings={setExpirySettings} stockThresholds={stockThresholds} setStockThresholds={setStockThresholds} showToast={showToast} apiKey={geminiApiKey} saveApiKey={saveApiKey} onDeleteCategoryOption={deleteCategoryOption} />}
       </main>
       {showScannerModal&&<ScannerModal onClose={()=>setShowScannerModal(false)} onScan={(s:FoodItem[])=>{setItems([...items,...s]);setShowScannerModal(false);showToast(`${s.length}件追加しました`);}} apiKey={geminiApiKey} categoryOptions={categoryOptions} addCategoryOption={addCategoryOption} locationOptions={locationOptions} addLocationOption={addLocationOption} emojiHistory={emojiHistory} expirySettings={expirySettings}/>}
       {editingItem&&<EditItemModal item={editingItem} onClose={()=>setEditingItem(null)} onSave={(u:FoodItem)=>{updateItem(u);setEditingItem(null);}} locationOptions={locationOptions} unitOptions={unitOptions}/>}
@@ -256,7 +267,7 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
   );
 }
 
-function SettingsScreen({ categoryOptions, expirySettings, setExpirySettings, stockThresholds, setStockThresholds, showToast, apiKey, saveApiKey }: any) {
+function SettingsScreen({ categoryOptions, expirySettings, setExpirySettings, stockThresholds, setStockThresholds, showToast, apiKey, saveApiKey, onDeleteCategoryOption }: any) {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'expiry'|'stock'|'api'>('expiry');
   const [inputApiKey, setInputApiKey] = useState(apiKey);
@@ -278,8 +289,8 @@ function SettingsScreen({ categoryOptions, expirySettings, setExpirySettings, st
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
         <h3 className="font-bold text-xl mb-4 flex items-center gap-2"><Settings className="w-6 h-6 text-gray-600"/>アプリ設定</h3>
         <div className="flex bg-gray-100 p-1 rounded-xl mb-6 overflow-x-auto"><button onClick={()=>setActiveTab('expiry')} className={`flex-1 py-2 px-2 rounded-lg text-sm font-bold whitespace-nowrap ${activeTab==='expiry'?'bg-white text-green-600 shadow-sm':'text-gray-500'}`}>賞味期限</button><button onClick={()=>setActiveTab('stock')} className={`flex-1 py-2 px-2 rounded-lg text-sm font-bold whitespace-nowrap ${activeTab==='stock'?'bg-white text-blue-600 shadow-sm':'text-gray-500'}`}>在庫アラート</button><button onClick={()=>setActiveTab('api')} className={`flex-1 py-2 px-2 rounded-lg text-sm font-bold whitespace-nowrap ${activeTab==='api'?'bg-white text-purple-600 shadow-sm':'text-gray-500'}`}><Sparkles className="w-4 h-4 inline mr-1"/>AI設定</button></div>
-        {activeTab==='api'?<div className="space-y-4"><h4 className="font-bold text-gray-800">Google Gemini APIキー</h4><input type="password" className="w-full p-3 bg-gray-50 border rounded-xl" placeholder="APIキー" value={inputApiKey} onChange={(e)=>setInputApiKey(e.target.value)}/><button onClick={()=>{saveApiKey(inputApiKey);showToast('保存しました');}} className="w-full py-3 bg-purple-600 text-white rounded-xl font-bold flex items-center justify-center gap-2"><Save className="w-4 h-4"/>保存</button></div>:
-        <><div className="mb-6 relative"><Search className="absolute left-3 top-3 text-gray-400 w-5 h-5"/><input type="text" placeholder="食品検索..." className="w-full pl-10 pr-4 py-3 bg-gray-50 border rounded-xl" value={searchTerm} onChange={(e)=>setSearchTerm(e.target.value)}/></div><div className="space-y-6">{Object.keys(filteredCategoryOptions).map(cat=><div key={cat}><h4 className="font-bold text-gray-800 mb-2">{CATEGORY_LABELS[cat]||cat}</h4><div className="grid grid-cols-2 gap-4">{filteredCategoryOptions[cat].map((i:string)=><div key={i} className="flex justify-between border-b pb-2"><span className="text-sm font-medium">{i}</span><input type="number" className="w-16 p-1 bg-gray-50 border rounded text-right" value={activeTab==='expiry'?expirySettings[i]||'':stockThresholds[i]||''} onChange={(e)=>activeTab==='expiry'?handleExpiryChange(i,Number(e.target.value)):handleStockChange(i,Number(e.target.value))}/></div>)}</div></div>)}</div><div className="mt-8 pt-4 border-t border-gray-100 flex justify-end"><button onClick={()=>showToast('設定を保存しました')} className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-xl font-bold shadow-md hover:bg-green-700 transition-colors"><Save className="w-5 h-5"/>設定を保存</button></div></>}
+        {activeTab==='api'?<div className="space-y-4"><h4 className="font-bold text-gray-800">Google Gemini APIキー</h4><p className="text-xs text-gray-500">AI機能を使用するにはAPIキーが必要です（ブラウザ保存）。</p><div className="flex gap-2"><input type="password" className="w-full p-3 bg-gray-50 border rounded-xl" placeholder="APIキーを入力" value={inputApiKey} onChange={(e)=>setInputApiKey(e.target.value)}/><button onClick={()=>{saveApiKey(inputApiKey);showToast('保存しました');}} className="w-full py-3 bg-purple-600 text-white rounded-xl font-bold flex items-center justify-center gap-2"><Save className="w-4 h-4"/>保存</button></div></div>:
+        <><div className="mb-6 relative"><Search className="absolute left-3 top-3 text-gray-400 w-5 h-5"/><input type="text" placeholder="食品検索..." className="w-full pl-10 pr-4 py-3 bg-gray-50 border rounded-xl" value={searchTerm} onChange={(e)=>setSearchTerm(e.target.value)}/></div><div className="space-y-6">{Object.keys(filteredCategoryOptions).map(cat=><div key={cat}><h4 className="font-bold text-gray-800 mb-2">{CATEGORY_LABELS[cat]||cat}</h4><div className="grid grid-cols-1 gap-2">{filteredCategoryOptions[cat].map((i:string)=><div key={i} className="flex justify-between items-center border-b pb-2"><span className="text-sm font-medium">{i}</span><div className="flex items-center gap-2"><input type="number" className="w-16 p-1 bg-gray-50 border rounded text-right" value={activeTab==='expiry'?expirySettings[i]||'':stockThresholds[i]||''} onChange={(e)=>activeTab==='expiry'?handleExpiryChange(i,Number(e.target.value)):handleStockChange(i,Number(e.target.value))}/><button onClick={()=>onDeleteCategoryOption(cat, i)} className="text-gray-400 hover:text-red-500"><Trash2 className="w-4 h-4"/></button></div></div>)}</div></div>)}</div><div className="mt-8 pt-4 border-t border-gray-100 flex justify-end"><button onClick={()=>showToast('設定を保存しました')} className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-xl font-bold shadow-md hover:bg-green-700 transition-colors"><Save className="w-5 h-5"/>設定を保存</button></div></>}
       </div>
     </div>
   );
@@ -298,7 +309,7 @@ function EmojiPicker({ onSelect, onClose }: { onSelect: (emoji: string) => void,
 
 // 編集用モーダル
 function EditItemModal({ item, onClose, onSave, locationOptions, unitOptions }: any) {
-  const [data, setData] = useState({ ...item });
+  const [data, setData] = useState<FoodItem>({ ...item });
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); onSave(data); };
   return (
@@ -316,7 +327,7 @@ function EditItemModal({ item, onClose, onSave, locationOptions, unitOptions }: 
           </div>
           <div><label className="text-xs font-bold text-gray-500">賞味期限</label><input type="date" className="w-full p-2 bg-gray-50 rounded-lg border font-mono" value={data.expiryDate} onChange={(e) => setData({ ...data, expiryDate: e.target.value })} /></div>
           <div className="grid grid-cols-2 gap-4">
-             <div><label className="text-xs font-bold text-gray-500">場所</label><select className="w-full p-2 bg-gray-50 rounded-lg border text-sm" value={data.storage} onChange={(e) => setData({ ...data, storage: e.target.value })}>{Object.keys(locationOptions).map(k => <option key={k} value={k}>{k}</option>)}</select></div>
+             <div><label className="text-xs font-bold text-gray-500">場所</label><select className="w-full p-2 bg-gray-50 rounded-lg border text-sm" value={data.storage} onChange={(e) => setData({ ...data, storage: e.target.value as any })}>{Object.keys(locationOptions).map(k => <option key={k} value={k}>{k}</option>)}</select></div>
              <div><label className="text-xs font-bold text-gray-500">詳細場所</label><select className="w-full p-2 bg-gray-50 rounded-lg border text-sm" value={data.location} onChange={(e) => setData({ ...data, location: e.target.value })}><option value="">未設定</option>{locationOptions[data.storage]?.map((l: string) => <option key={l} value={l}>{l}</option>)}</select></div>
           </div>
           <button type="submit" className="w-full py-3 bg-green-600 text-white font-bold rounded-xl shadow-md mt-4">保存する</button>
@@ -601,7 +612,7 @@ function ScannerModal({ onClose, onScan, apiKey, categoryOptions, addCategoryOpt
 
       try {
         const base64Image = await fileToBase64(imageFile);
-        const prompt = `このレシート画像を解析し、購入された食品アイテムのリストを作成してください。以下のJSON形式のみを出力してください。賞味期限は、もしレシートに日付があればそこから適切に推測するか、食品の一般的な日持ちを考慮して今日からの日付（YYYY-MM-DD）を設定してください。\n\n{\n  "items": [\n    {\n      "name": "食品名",\n      "quantity": 数値（個数など）,\n      "unit": "単位（個、本、パックなど）",\n      "expiryDate": "YYYY-MM-DD",\n      "category": "dairy" | "egg" | "vegetable" | "fruit" | "meat" | "fish" | "other",\n      "emoji": "絵文字"\n    }\n  ]\n}`;
+        const prompt = `このレシート画像を解析し、購入された食品アイテムのリストを作成してください。以下のJSON形式のみを出力してください。商品名（name）は、レシートの記載そのものではなく、一般的な食材名に修正（正規化）してください。例：「北海道産牛肉切り落とし」→「牛肉」、「キャベツ1/2カット」→「キャベツ」、「特選牛乳」→「牛乳」。賞味期限は、もしレシートに日付があればそこから適切に推測するか、食品の一般的な日持ちを考慮して今日からの日付（YYYY-MM-DD）を設定してください。\n\n{\n  "items": [\n    {\n      "name": "食品名",\n      "quantity": 数値（個数など）,\n      "unit": "単位（個、本、パックなど）",\n      "expiryDate": "YYYY-MM-DD",\n      "category": "dairy" | "egg" | "vegetable" | "fruit" | "meat" | "fish" | "other",\n      "emoji": "絵文字"\n    }\n  ]\n}`;
 
         const data = await callGeminiWithRetry(apiKey, {
           contents: [{
@@ -705,11 +716,16 @@ function ScannerModal({ onClose, onScan, apiKey, categoryOptions, addCategoryOpt
   return (
     <div className="fixed inset-0 bg-black/80 z-50 flex flex-col items-center justify-center p-4">
       <div className="bg-white w-full max-w-md rounded-3xl overflow-hidden relative flex flex-col max-h-[90vh]">
-        <div className="flex border-b border-gray-100"><div className={`flex-1 py-4 font-bold text-sm flex items-center justify-center gap-2 text-blue-600 border-b-2 border-blue-600`}><FileText className="w-5 h-5" /> レシートOCR (Gemini AI)</div></div>
+        <div className="flex border-b border-gray-100">
+            <div className={`flex-1 py-4 font-bold text-sm flex items-center justify-center gap-2 text-blue-600 border-b-2 border-blue-600`}><FileText className="w-5 h-5" /> レシートOCR (Gemini AI)</div>
+        </div>
         <div className="flex-1 bg-gray-50 relative overflow-y-auto min-h-[300px] flex flex-col items-center justify-center p-4">
           <div className="w-full flex flex-col items-center">
               {!capturedImage ? (
-                  <label className="w-full h-48 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:bg-gray-100 transition-colors mb-4"><Camera className="w-12 h-12 text-gray-400 mb-2" /><span className="text-sm text-gray-500 font-bold">写真を撮る / アップロード</span><input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleReceiptCapture} /></label>
+                  <label className="w-full h-48 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:bg-gray-100 transition-colors mb-4">
+                      <Camera className="w-12 h-12 text-gray-400 mb-2" /><span className="text-sm text-gray-500 font-bold">写真を撮る / アップロード</span>
+                      <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleReceiptCapture} />
+                  </label>
               ) : (
                   <div className="w-full mb-4 relative"><img src={capturedImage} alt="Receipt" className="w-full h-48 object-contain bg-black rounded-lg" />{scanning && (<div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center text-white rounded-lg"><Loader2 className="w-8 h-8 animate-spin mb-2" /><span className="text-xs font-bold">AI解析中...</span></div>)}</div>
               )}
