@@ -1,144 +1,97 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, Ban, Save, FileText, Loader2, Sparkles, Image as ImageIcon } from 'lucide-react';
+import React, { useState, useEffect, useMemo, ChangeEvent } from 'react';
+import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles, Image as ImageIcon } from 'lucide-react';
 
 // --- 型定義 ---
-type StorageType = 'refrigerator'|'freezer_main'|'freezer_sub'|'vegetable'|'ambient';
-type ItemCategory = 'dairy'|'egg'|'vegetable'|'fruit'|'meat'|'fish'|'other';
-type FilterMode = 'all'|'expired'|'near'|'lowStock';
-interface FoodItem { id: string; name: string; storage: StorageType; category: ItemCategory; categorySmall: string; location: string; expiryDate: string; quantity: number; unit: string; addedDate: string; emoji: string; }
-interface ShoppingItem { id: string; name: string; quantity: number; unit: string; isChecked: boolean; addedDate: string; }
-interface RecipeMaterial { name: string; amount: number|string; unit: string; }
-interface Recipe { id: string; title: string; time: string; ingredients: RecipeMaterial[]; missing: RecipeMaterial[]; desc: string; steps?: string[]; mode: 'auto'|'custom'; createdAt: string; userRequest?: string; allMaterials: RecipeMaterial[]; imageUrl?: string; }
-interface ScannedItem extends FoodItem { isSelected: boolean; }
+type StorageType='refrigerator'|'freezer_main'|'freezer_sub'|'vegetable'|'ambient';
+type ItemCategory='dairy'|'egg'|'vegetable'|'fruit'|'meat'|'fish'|'other';
+type FilterMode='all'|'expired'|'near'|'lowStock';
+interface FoodItem{id:string;name:string;storage:StorageType;category:ItemCategory;categorySmall:string;location:string;expiryDate:string;quantity:number;unit:string;addedDate:string;emoji:string;}
+interface ShoppingItem{id:string;name:string;quantity:number;unit:string;isChecked:boolean;addedDate:string;}
+interface RecipeMaterial{name:string;amount:number|string;unit:string;}
+interface Recipe{id:string;title:string;time:string;ingredients:RecipeMaterial[];missing:RecipeMaterial[];desc:string;steps?:string[];mode:'auto'|'custom';createdAt:string;userRequest?:string;allMaterials:RecipeMaterial[];imageUrl?:string;}
+interface ScannedItem extends FoodItem{isSelected:boolean;}
 
 // --- 定数 ---
 const GEMINI_MODEL = "gemini-3-flash-preview"; 
 const IMAGEN_MODEL = "imagen-4.0-generate-001"; // 画像生成用モデル
-const IGNORED_MISSING_ITEMS = ['水', '氷', 'お湯', '熱湯', 'Water', 'Ice']; // 不足リストから除外するもの
+const IGNORED_MISSING_ITEMS=['水','氷','お湯','熱湯','Water','Ice'];
 
 // --- ヘルパー ---
-const formatAmountStr = (amount: number|string, unit: string) => { const u=['少々','適量','お好みで','ひとつまみ','適宜']; return u.includes(unit)?unit:`${amount}${unit}`; };
-const fileToBase64 = (file: File): Promise<string> => new Promise((resolve, reject) => { const reader = new FileReader(); reader.readAsDataURL(file); reader.onload = () => resolve((reader.result as string).split(',')[1]); reader.onerror = reject; });
-const loadFromStorage = <T,>(key: string, v: T): T => { try { const i = window.localStorage.getItem(key); return i ? JSON.parse(i) : v; } catch { return v; } };
+const formatAmountStr=(a:number|string,u:string)=>{const n=['少々','適量','お好みで','ひとつまみ','適宜'];return n.includes(u)?u:`${a}${u}`;};
+const fileToBase64=(f:File):Promise<string>=>new Promise((r,j)=>{const d=new FileReader();d.readAsDataURL(f);d.onload=()=>r((d.result as string).split(',')[1]);d.onerror=j;});
+const loadFromStorage=<T,>(k:string,v:T):T=>{try{const i=window.localStorage.getItem(k);return i?JSON.parse(i):v;}catch{return v;}};
 
 // APIリトライ関数
-const callGeminiWithRetry = async (apiKey: string, payload: any, retries = 3, delay = 2000): Promise<any> => {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
-  for (let i=0; i<=retries; i++) {
-    try {
-      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      if (res.ok) return await res.json();
-      if ((res.status===429 || res.status===503) && i<retries) { await new Promise(r => setTimeout(r, delay)); delay *= 2; continue; }
-      throw new Error(`Gemini API Error: ${res.status}`);
-    } catch (e) { if (i===retries) throw e; await new Promise(r => setTimeout(r, delay)); delay *= 2; }
-  }
-};
+const callGeminiWithRetry=async(k:string,p:any,r=3,d=2000):Promise<any>=>{const u=`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${k}`;for(let i=0;i<=r;i++){try{const res=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});if(res.ok)return await res.json();if((res.status===429||res.status===503)&&i<r){await new Promise(x=>setTimeout(x,d));d*=2;continue;}throw new Error(`API Error:${res.status}`);}catch(e){if(i===r)throw e;await new Promise(x=>setTimeout(x,d));d*=2;}}};
 
-// 画像生成API呼び出し関数
-const generateImageWithImagen = async (apiKey: string, prompt: string): Promise<string | null> => {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${IMAGEN_MODEL}:predict?key=${apiKey}`;
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ instances: [{ prompt }], parameters: { sampleCount: 1 } })
-    });
-    if (!res.ok) throw new Error(`Imagen API Error: ${res.status}`);
-    const data = await res.json();
-    // Base64画像データを返す
-    return `data:image/png;base64,${data.predictions[0].bytesBase64Encoded}`;
-  } catch (e) {
-    console.error("Image Generation Failed:", e);
-    return null; // 失敗時はnullを返す
-  }
+// 画像生成関数
+const generateImageWithImagen=async(k:string,p:string):Promise<string|null>=>{
+  const u=`https://generativelanguage.googleapis.com/v1beta/models/${IMAGEN_MODEL}:predict?key=${k}`;
+  try{
+    const res=await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({instances:[{prompt:p}],parameters:{sampleCount:1}})});
+    if(!res.ok)throw new Error(`Imagen Error:${res.status}`);
+    const d=await res.json();
+    return `data:image/png;base64,${d.predictions[0].bytesBase64Encoded}`;
+  }catch(e){console.error(e);return null;}
 };
 
 // --- データ (圧縮) ---
-const INITIAL_ITEMS: FoodItem[] = [{id:'1',name:'牛乳',storage:'refrigerator',category:'dairy',categorySmall:'牛乳',location:'ドアポケット',expiryDate:new Date(Date.now()+172800000).toISOString().split('T')[0],quantity:1,unit:'本',addedDate:'2023-10-25',emoji:'🥛'},{id:'2',name:'卵',storage:'refrigerator',category:'egg',categorySmall:'卵',location:'上段',expiryDate:new Date(Date.now()+432000000).toISOString().split('T')[0],quantity:2,unit:'個',addedDate:'2023-10-20',emoji:'🥚'},{id:'3',name:'豚バラ肉',storage:'freezer_main',category:'meat',categorySmall:'豚肉',location:'上段トレー',expiryDate:new Date(Date.now()+1728000000).toISOString().split('T')[0],quantity:200,unit:'g',addedDate:'2023-10-15',emoji:'🥩'}];
-const INITIAL_SHOPPING_LIST: ShoppingItem[] = [{id:'s1',name:'醤油',quantity:1,unit:'本',isChecked:false,addedDate:'2023-10-25'}];
-const INITIAL_UNIT_OPTIONS = ['個','本','g','kg','ml','L','パック','玉','袋','束','枚','切れ','缶','瓶','箱','少々','適量'];
-const EMOJI_KEYWORDS: Record<string, string> = { '牛':'🥩','豚':'🥩','鶏':'🍗','肉':'🥩','ハム':'🥩','魚':'🐟','鮭':'🐟','鯖':'🐟','海老':'🦐','牛乳':'🥛','卵':'🥚','キャベツ':'🥬','レタス':'🥬','トマト':'🍅','人参':'🥕','玉ねぎ':'🧅','りんご':'🍎','みかん':'🍊','バナナ':'🍌','パン':'🍞','うどん':'🍜','カレー':'🍛','アイス':'🍨','チョコ':'🍫','酒':'🍶','ビール':'🍺','豆腐':'🧊','納豆':'🥢' };
-const EMOJI_LIBRARY: Record<string, string[]> = { '野菜・果物': ['🥦','🥬','🥒','🌽','🥕','🥔','🍅','🍆','🧅','🍎','🍊','🍌','🍇','🍓','🍑','🍍','🥝'], '肉・魚・卵': ['🥩','🍗','🥓','🍖','🍔','🐟','🐠','🦐','🦀','🦑','🍣','🥚','🍳'], '乳製品・飲料': ['🥛','🧀','🧈','🍦','🍵','☕','🧃','🥤','🍺','🍷'], '穀物・麺類': ['🍚','🍙','🍜','🍝','🍞','🥐','🥪','🍕'], 'その他': ['🍱','🥫','🥢','🍫','🍬','🍮','🧂','🥡'] };
-const CATEGORY_LABELS: Record<string, string> = { dairy:'🥛 乳製品', egg:'🥚 卵', meat:'🥩 肉類', fish:'🐟 魚介', vegetable:'🥦 野菜', fruit:'🍎 果物', other:'🥫 その他' };
-const INITIAL_CATEGORY_OPTIONS: Record<ItemCategory, string[]> = { dairy:['牛乳','ヨーグルト','チーズ'], egg:['卵'], meat:['豚肉','牛肉','鶏肉','ハム'], fish:['鮭','サバ'], vegetable:['キャベツ','人参','玉ねぎ','トマト'], fruit:['りんご','バナナ','みかん'], other:['豆腐','納豆'] };
-const INITIAL_LOCATION_OPTIONS: Record<StorageType, string[]> = { refrigerator:['ドアポケット','上段','中段'], freezer_main:['上段','下段'], freezer_sub:['製氷室横'], vegetable:['上段','下段'], ambient:['棚','カゴ'] };
-const DEFAULT_EXPIRY_DAYS: Record<string, number> = { '牛乳':7, '卵':14, '納豆':10, '豚肉':3, '牛肉':3, '鶏肉':2, 'キャベツ':7, 'レタス':4, 'トマト':5, '玉ねぎ':30, 'りんご':14 };
-const DEFAULT_STOCK_THRESHOLDS: Record<string, number> = { '卵':3, '牛乳':1, '納豆':1 };
+const INITIAL_ITEMS:FoodItem[]=[{id:'1',name:'牛乳',storage:'refrigerator',category:'dairy',categorySmall:'牛乳',location:'ドアポケット',expiryDate:new Date(Date.now()+172800000).toISOString().split('T')[0],quantity:1,unit:'本',addedDate:'2023-10-25',emoji:'🥛'},{id:'2',name:'卵',storage:'refrigerator',category:'egg',categorySmall:'卵',location:'上段',expiryDate:new Date(Date.now()+432000000).toISOString().split('T')[0],quantity:2,unit:'個',addedDate:'2023-10-20',emoji:'🥚'},{id:'3',name:'豚バラ肉',storage:'freezer_main',category:'meat',categorySmall:'豚肉',location:'上段トレー',expiryDate:new Date(Date.now()+1728000000).toISOString().split('T')[0],quantity:200,unit:'g',addedDate:'2023-10-15',emoji:'🥩'}];
+const INITIAL_SHOPPING_LIST:ShoppingItem[]=[{id:'s1',name:'醤油',quantity:1,unit:'本',isChecked:false,addedDate:'2023-10-25'}];
+const INITIAL_UNIT_OPTIONS=['個','本','g','kg','ml','L','パック','玉','袋','束','枚','切れ','缶','瓶','箱','少々','適量'];
+const EMOJI_KEYWORDS:Record<string,string>={'牛':'🥩','豚':'🥩','鶏':'🍗','肉':'🥩','魚':'🐟','鮭':'🐟','鯖':'🐟','海老':'🦐','牛乳':'🥛','卵':'🥚','キャベツ':'🥬','レタス':'🥬','トマト':'🍅','人参':'🥕','玉ねぎ':'🧅','りんご':'🍎','みかん':'🍊','バナナ':'🍌','パン':'🍞','うどん':'🍜','カレー':'🍛','アイス':'🍨','チョコ':'🍫','酒':'🍶','ビール':'🍺','豆腐':'🧊','納豆':'🥢'};
+const EMOJI_LIBRARY:Record<string,string[]>={'野菜・果物':['🥦','🥬','🥒','🌽','🥕','🥔','🍅','🍆','🧅','🍎','🍊','🍌','🍇','🍓','🍑','🍍','🥝'],'肉・魚・卵':['🥩','🍗','🥓','🍖','🍔','🐟','🐠','🦐','🦀','🦑','🍣','🥚','🍳'],'乳製品・飲料':['🥛','🧀','🧈','🍦','🍵','☕','🧃','🥤','🍺','🍷'],'穀物・麺類':['🍚','🍙','🍜','🍝','🍞','🥐','🥪','🍕'],'その他':['🍱','🥫','🥢','🍫','🍬','🍮','🧂','🥡']};
+const CATEGORY_LABELS:Record<string,string>={dairy:'🥛 乳製品',egg:'🥚 卵',meat:'🥩 肉類',fish:'🐟 魚介',vegetable:'🥦 野菜',fruit:'🍎 果物',other:'🥫 その他'};
+const INITIAL_CATEGORY_OPTIONS:Record<ItemCategory,string[]>={dairy:['牛乳','ヨーグルト','チーズ'],egg:['卵'],meat:['豚肉','牛肉','鶏肉','ハム'],fish:['鮭','サバ'],vegetable:['キャベツ','人参','玉ねぎ','トマト'],fruit:['りんご','バナナ','みかん'],other:['豆腐','納豆']};
+const INITIAL_LOCATION_OPTIONS:Record<StorageType,string[]>={refrigerator:['ドアポケット','上段','中段'],freezer_main:['上段','下段'],freezer_sub:['製氷室横'],vegetable:['上段','下段'],ambient:['棚','カゴ']};
+const DEFAULT_EXPIRY_DAYS:Record<string,number>={'牛乳':7,'卵':14,'納豆':10,'豚肉':3,'牛肉':3,'鶏肉':2,'キャベツ':7,'レタス':4,'トマト':5,'玉ねぎ':30,'りんご':14};
+const DEFAULT_STOCK_THRESHOLDS:Record<string,number>={'卵':3,'牛乳':1,'納豆':1};
 
 // --- アプリ本体 ---
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard'|'inventory'|'add'|'recipes'|'shopping'|'settings'>('dashboard');
-  
-  // データの永続化
-  const [items, setItems] = useState<FoodItem[]>(() => loadFromStorage('sf_items', INITIAL_ITEMS));
-  const [shoppingList, setShoppingList] = useState<ShoppingItem[]>(() => loadFromStorage('sf_shoppingList', INITIAL_SHOPPING_LIST));
-  const [recipeHistory, setRecipeHistory] = useState<Recipe[]>(() => loadFromStorage('sf_recipeHistory', []));
-  const [geminiApiKey, setGeminiApiKey] = useState<string>(''); 
-  const [categoryOptions, setCategoryOptions] = useState(() => loadFromStorage('sf_categoryOptions', INITIAL_CATEGORY_OPTIONS));
-  const [locationOptions, setLocationOptions] = useState(() => loadFromStorage('sf_locationOptions', INITIAL_LOCATION_OPTIONS));
-  const [unitOptions, setUnitOptions] = useState<string[]>(() => loadFromStorage('sf_unitOptions', INITIAL_UNIT_OPTIONS));
-  const [expirySettings, setExpirySettings] = useState<Record<string, number>>(() => loadFromStorage('sf_expirySettings', DEFAULT_EXPIRY_DAYS));
-  const [stockThresholds, setStockThresholds] = useState<Record<string, number>>(() => loadFromStorage('sf_stockThresholds', DEFAULT_STOCK_THRESHOLDS));
-  const [emojiHistory, setEmojiHistory] = useState<Record<string, string>>(() => {
-    const saved = window.localStorage.getItem('sf_emojiHistory');
-    if (saved) return JSON.parse(saved);
-    const history: Record<string, string> = {};
-    INITIAL_ITEMS.forEach(item => { history[item.categorySmall] = item.emoji; });
-    return history;
-  });
+  const [activeTab,setActiveTab]=useState<'dashboard'|'inventory'|'add'|'recipes'|'shopping'|'settings'>('dashboard');
+  const [items,setItems]=useState<FoodItem[]>(()=>loadFromStorage('sf_items',INITIAL_ITEMS));
+  const [shoppingList,setShoppingList]=useState<ShoppingItem[]>(()=>loadFromStorage('sf_shoppingList',INITIAL_SHOPPING_LIST));
+  const [recipeHistory,setRecipeHistory]=useState<Recipe[]>(()=>loadFromStorage('sf_recipeHistory',[]));
+  const [geminiApiKey,setGeminiApiKey]=useState<string>('');
+  const [categoryOptions,setCategoryOptions]=useState(()=>loadFromStorage('sf_categoryOptions',INITIAL_CATEGORY_OPTIONS));
+  const [locationOptions,setLocationOptions]=useState(()=>loadFromStorage('sf_locationOptions',INITIAL_LOCATION_OPTIONS));
+  const [unitOptions,setUnitOptions]=useState<string[]>(()=>loadFromStorage('sf_unitOptions',INITIAL_UNIT_OPTIONS));
+  const [expirySettings,setExpirySettings]=useState<Record<string,number>>(()=>loadFromStorage('sf_expirySettings',DEFAULT_EXPIRY_DAYS));
+  const [stockThresholds,setStockThresholds]=useState<Record<string,number>>(()=>loadFromStorage('sf_stockThresholds',DEFAULT_STOCK_THRESHOLDS));
+  const [emojiHistory,setEmojiHistory]=useState<Record<string,string>>(()=>loadFromStorage('sf_emojiHistory',{}));
+  const [editingItem,setEditingItem]=useState<FoodItem|null>(null);
+  const [inventoryFilterMode,setInventoryFilterMode]=useState<FilterMode>('all');
+  const [showScannerModal,setShowScannerModal]=useState(false);
+  const [notification,setNotification]=useState<string|null>(null);
 
-  const [editingItem, setEditingItem] = useState<FoodItem | null>(null);
+  useEffect(()=>{localStorage.setItem('sf_items',JSON.stringify(items));},[items]);
+  useEffect(()=>{localStorage.setItem('sf_shoppingList',JSON.stringify(shoppingList));},[shoppingList]);
+  useEffect(()=>{localStorage.setItem('sf_recipeHistory',JSON.stringify(recipeHistory));},[recipeHistory]);
+  useEffect(()=>{localStorage.setItem('sf_categoryOptions',JSON.stringify(categoryOptions));},[categoryOptions]);
+  useEffect(()=>{localStorage.setItem('sf_locationOptions',JSON.stringify(locationOptions));},[locationOptions]);
+  useEffect(()=>{localStorage.setItem('sf_unitOptions',JSON.stringify(unitOptions));},[unitOptions]);
+  useEffect(()=>{localStorage.setItem('sf_expirySettings',JSON.stringify(expirySettings));},[expirySettings]);
+  useEffect(()=>{localStorage.setItem('sf_stockThresholds',JSON.stringify(stockThresholds));},[stockThresholds]);
+  useEffect(()=>{localStorage.setItem('sf_emojiHistory',JSON.stringify(emojiHistory));},[emojiHistory]);
+  useEffect(()=>{const k=localStorage.getItem('GEMINI_API_KEY');if(k)setGeminiApiKey(k);},[]);
 
-  useEffect(() => { localStorage.setItem('sf_items', JSON.stringify(items)); }, [items]);
-  useEffect(() => { localStorage.setItem('sf_shoppingList', JSON.stringify(shoppingList)); }, [shoppingList]);
-  useEffect(() => { localStorage.setItem('sf_recipeHistory', JSON.stringify(recipeHistory)); }, [recipeHistory]);
-  useEffect(() => { localStorage.setItem('sf_categoryOptions', JSON.stringify(categoryOptions)); }, [categoryOptions]);
-  useEffect(() => { localStorage.setItem('sf_locationOptions', JSON.stringify(locationOptions)); }, [locationOptions]);
-  useEffect(() => { localStorage.setItem('sf_unitOptions', JSON.stringify(unitOptions)); }, [unitOptions]);
-  useEffect(() => { localStorage.setItem('sf_expirySettings', JSON.stringify(expirySettings)); }, [expirySettings]);
-  useEffect(() => { localStorage.setItem('sf_stockThresholds', JSON.stringify(stockThresholds)); }, [stockThresholds]);
-  useEffect(() => { localStorage.setItem('sf_emojiHistory', JSON.stringify(emojiHistory)); }, [emojiHistory]);
-
-  const [inventoryFilterMode, setInventoryFilterMode] = useState<FilterMode>('all');
-  const [showScannerModal, setShowScannerModal] = useState(false);
-  const [notification, setNotification] = useState<string | null>(null);
-
-  useEffect(() => { const savedKey = localStorage.getItem('GEMINI_API_KEY'); if (savedKey) setGeminiApiKey(savedKey); }, []);
-  const saveApiKey = (key: string) => { setGeminiApiKey(key); localStorage.setItem('GEMINI_API_KEY', key); showToast('APIキーを保存しました'); };
-  const showToast = (msg: string) => { setNotification(msg); setTimeout(() => setNotification(null), 3000); };
-  const addCategoryOption = (category: ItemCategory, newOption: string) => { setCategoryOptions((prev:any) => { const c=prev[category]||[]; return !c.includes(newOption) ? {...prev, [category]: [...c, newOption]} : prev; }); };
-  const addLocationOption = (storage: StorageType, newOption: string) => { setLocationOptions((prev:any) => { const c=prev[storage]||[]; return !c.includes(newOption) ? {...prev, [storage]: [...c, newOption]} : prev; }); };
-  const addUnitOption = (newUnit: string) => { setUnitOptions(prev => !prev.includes(newUnit) ? [...prev, newUnit] : prev); };
-  const updateEmojiHistory = (name: string, emoji: string) => { setEmojiHistory(prev => ({ ...prev, [name]: emoji })); };
-  const addRecipeToHistory = (recipe: Recipe) => { setRecipeHistory(prev => [recipe, ...prev]); };
-  
-  const deleteCategoryOption = (category: string, itemName: string) => {
-    setCategoryOptions((prev: any) => {
-      const newOptions = { ...prev };
-      if (newOptions[category]) newOptions[category] = newOptions[category].filter((i: string) => i !== itemName);
-      return newOptions;
-    });
-    setExpirySettings((prev: any) => { const n = { ...prev }; delete n[itemName]; return n; });
-    setStockThresholds((prev: any) => { const n = { ...prev }; delete n[itemName]; return n; });
-    showToast(`${itemName} を削除しました`);
-  };
-
-  const addToShoppingList = (itemName: string, quantity: number = 1, unit: string = '個') => {
-    setShoppingList(prev => {
-      if (prev.some(item => item.name === itemName)) { showToast(`${itemName} は既にリストにあります`); return prev; }
-      return [...prev, { id: Date.now().toString(), name: itemName, quantity, unit, isChecked: false, addedDate: new Date().toISOString().split('T')[0] }];
-    });
-    showToast(`${itemName} を買い物リストに追加しました`);
-  };
-
-  const toggleShoppingItem = (id: string) => { setShoppingList(prev => prev.map(item => item.id === id ? { ...item, isChecked: !item.isChecked } : item)); };
-  const deleteShoppingItem = (id: string) => { setShoppingList(prev => prev.filter(item => item.id !== id)); };
-  const updateShoppingItemQuantity = (id: string, delta: number) => { setShoppingList(prev => prev.map(item => item.id === id ? { ...item, quantity: Math.max(1, item.quantity + delta) } : item)); };
-  const lowStockItems = useMemo(() => { const g: Record<string, number> = {}; items.forEach(i => { const k = i.categorySmall || i.name; g[k] = (g[k] || 0) + i.quantity; }); const l: string[] = []; Object.keys(stockThresholds).forEach(k => { if ((g[k] || 0) < stockThresholds[k]) l.push(k); }); return l; }, [items, stockThresholds]);
-  const statusCounts = useMemo(() => { const today = new Date().toISOString().split('T')[0]; const d3 = new Date(Date.now() + 259200000).toISOString().split('T')[0]; let e=0, w=0; items.forEach(i => { if (i.expiryDate < today) e++; else if (i.expiryDate <= d3) w++; }); return { expired: e, warning: w, total: items.length, lowStock: lowStockItems.length }; }, [items, lowStockItems]);
-  const deleteItem = (id: string) => { setItems(items.filter(i => i.id !== id)); showToast('商品を削除しました'); };
-  const exportToKeep = () => { console.log(shoppingList.filter(i => !i.isChecked).map(i => `・${i.name} ${formatAmountStr(i.quantity, i.unit)}`).join('\n')); showToast('Google Keepのリストに追加しました (Demo)'); };
-  const updateItem = (updatedItem: FoodItem) => { setItems(prev => prev.map(item => item.id === updatedItem.id ? updatedItem : item)); showToast(`${updatedItem.name} を更新しました`); };
+  const saveApiKey=(k:string)=>{setGeminiApiKey(k);localStorage.setItem('GEMINI_API_KEY',k);showToast('APIキー保存完了');};
+  const showToast=(m:string)=>{setNotification(m);setTimeout(()=>setNotification(null),3000);};
+  const addCategoryOption=(c:ItemCategory,n:string)=>{setCategoryOptions((p:any)=>{const cur=p[c]||[];return!cur.includes(n)?{...p,[c]:[...cur,n]}:p;});};
+  const addLocationOption=(s:StorageType,n:string)=>{setLocationOptions((p:any)=>{const cur=p[s]||[];return!cur.includes(n)?{...p,[s]:[...cur,n]}:p;});};
+  const addUnitOption=(u:string)=>{setUnitOptions(p=>!p.includes(u)?[...p,u]:p);};
+  const updateEmojiHistory=(n:string,e:string)=>{setEmojiHistory(p=>({...p,[n]:e}));};
+  const addRecipeToHistory=(r:Recipe)=>{setRecipeHistory(p=>[r,...p]);};
+  const deleteCategoryOption=(c:string,n:string)=>{setCategoryOptions((p:any)=>{const x={...p};if(x[c])x[c]=x[c].filter((i:string)=>i!==n);return x;});setExpirySettings((p:any)=>{const x={...p};delete x[n];return x;});setStockThresholds((p:any)=>{const x={...p};delete x[n];return x;});showToast(`${n}を削除しました`);};
+  const updateItem=(u:FoodItem)=>{setItems(p=>p.map(i=>i.id===u.id?u:i));showToast(`${u.name}を更新`);};
+  const deleteItem=(id:string)=>{setItems(items.filter(i=>i.id!==id));showToast('削除しました');};
+  const addToShoppingList=(n:string,q=1,u='個')=>{setShoppingList(p=>{if(p.some(i=>i.name===n)){showToast('既にリストにあります');return p;}return[...p,{id:Date.now().toString(),name:n,quantity:q,unit:u,isChecked:false,addedDate:new Date().toISOString().split('T')[0]}]});showToast('リストに追加しました');};
+  const toggleShoppingItem=(id:string)=>{setShoppingList(p=>p.map(i=>i.id===id?{...i,isChecked:!i.isChecked}:i));};
+  const deleteShoppingItem=(id:string)=>{setShoppingList(p=>p.filter(i=>i.id!==id));};
+  const updateShoppingItemQuantity=(id:string,d:number)=>{setShoppingList(p=>p.map(i=>i.id===id?{...i,quantity:Math.max(1,i.quantity+d)}:i));};
+  const lowStockItems=useMemo(()=>{const g:Record<string,number>={};items.forEach(i=>{const k=i.categorySmall||i.name;g[k]=(g[k]||0)+i.quantity;});const l:string[]=[];Object.keys(stockThresholds).forEach(k=>{if((g[k]||0)<stockThresholds[k])l.push(k);});return l;},[items,stockThresholds]);
+  const statusCounts=useMemo(()=>{const t=new Date().toISOString().split('T')[0];const d3=new Date(Date.now()+259200000).toISOString().split('T')[0];let e=0,w=0;items.forEach(i=>{if(i.expiryDate<t)e++;else if(i.expiryDate<=d3)w++;});return{expired:e,warning:w,total:items.length,lowStock:lowStockItems.length};},[items,lowStockItems]);
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800 font-sans pb-20 md:pb-0 md:pl-64">
@@ -150,7 +103,7 @@ export default function App() {
         {activeTab==='inventory'&&<InventoryList items={items} deleteItem={deleteItem} onAddToShoppingList={addToShoppingList} lowStockItems={lowStockItems} stockThresholds={stockThresholds} inventoryFilterMode={inventoryFilterMode} setInventoryFilterMode={setInventoryFilterMode} onEdit={setEditingItem}/>}
         {activeTab==='add'&&<AddItemForm categoryOptions={categoryOptions} addCategoryOption={addCategoryOption} locationOptions={locationOptions} addLocationOption={addLocationOption} unitOptions={unitOptions} addUnitOption={addUnitOption} expirySettings={expirySettings} emojiHistory={emojiHistory} updateEmojiHistory={updateEmojiHistory} onAdd={(n:FoodItem)=>{setItems([...items,n]);showToast('追加しました');setActiveTab('inventory');}} onCancel={()=>setActiveTab('dashboard')}/>}
         {activeTab==='recipes'&&<RecipeGenerator items={items} onAddToShoppingList={addToShoppingList} history={recipeHistory} onAddHistory={addRecipeToHistory} apiKey={geminiApiKey}/>}
-        {activeTab==='shopping'&&<ShoppingList items={shoppingList} onToggle={toggleShoppingItem} onDelete={deleteShoppingItem} onAdd={addToShoppingList} onUpdateQuantity={updateShoppingItemQuantity} onExport={exportToKeep} unitOptions={unitOptions} addUnitOption={addUnitOption}/>}
+        {activeTab==='shopping'&&<ShoppingList items={shoppingList} onToggle={toggleShoppingItem} onDelete={deleteShoppingItem} onAdd={addToShoppingList} onUpdateQuantity={updateShoppingItemQuantity} onExport={()=>{console.log(shoppingList);showToast('出力しました(Demo)');}} unitOptions={unitOptions} addUnitOption={addUnitOption}/>}
         {activeTab==='settings'&&<SettingsScreen categoryOptions={categoryOptions} expirySettings={expirySettings} setExpirySettings={setExpirySettings} stockThresholds={stockThresholds} setStockThresholds={setStockThresholds} showToast={showToast} apiKey={geminiApiKey} saveApiKey={saveApiKey} onDeleteCategoryOption={deleteCategoryOption}/>}
       </main>
       {showScannerModal&&<ScannerModal onClose={()=>setShowScannerModal(false)} onScan={(s:FoodItem[])=>{setItems([...items,...s]);setShowScannerModal(false);showToast(`${s.length}件追加しました`);}} apiKey={geminiApiKey} categoryOptions={categoryOptions} addCategoryOption={addCategoryOption} locationOptions={locationOptions} addLocationOption={addLocationOption} emojiHistory={emojiHistory} expirySettings={expirySettings}/>}
@@ -161,7 +114,7 @@ export default function App() {
 
 // --- Components ---
 function Navigation({ activeTab, setActiveTab, counts }: any) {
-  const tabs = [ { id: 'dashboard', icon: LayoutDashboard, label: 'ホーム' }, { id: 'inventory', icon: Refrigerator, label: '冷蔵庫' }, { id: 'add', icon: Plus, label: '追加', isAction: true }, { id: 'recipes', icon: ChefHat, label: 'レシピ' }, { id: 'shopping', icon: ShoppingCart, label: '買い物' }, { id: 'settings', icon: Settings, label: '設定' }];
+  const tabs=[{id:'dashboard',icon:LayoutDashboard,label:'ホーム'},{id:'inventory',icon:Refrigerator,label:'冷蔵庫'},{id:'add',icon:Plus,label:'追加',isAction:true},{id:'recipes',icon:ChefHat,label:'レシピ'},{id:'shopping',icon:ShoppingCart,label:'買い物'},{id:'settings',icon:Settings,label:'設定'}];
   return (
     <>
       <div className="hidden md:flex flex-col w-64 bg-white h-screen fixed left-0 top-0 border-r border-gray-200 shadow-sm z-10">
@@ -477,41 +430,25 @@ function RecipeGenerator({ items, onAddToShoppingList, history, onAddHistory, ap
   const [recipeImage, setRecipeImage] = useState<string|null>(null);
   const [imageLoading, setImageLoading] = useState(false);
 
-  const generateImage = async (prompt: string) => {
-    setImageLoading(true);
+  const generateImageWithImagen = async (apiKey: string, prompt: string): Promise<string | null> => {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${apiKey}`;
     try {
-      // 実際には画像生成用のエンドポイントを使用しますが、ここではテキスト生成で代用するか、
-      // またはユーザーが画像生成用のモデル(imagen-3.0等)へのアクセス権を持っている前提のコードになります。
-      // 現状のAPIキーで画像生成が難しい場合が多いため、ここではプレビュー用のダミーロジックとします。
-      // 本番環境でImagenが利用可能な場合は、以下のfetch処理を有効化してください。
-      
-      /*
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${apiKey}`, {
-         method: 'POST',
-         headers: {'Content-Type': 'application/json'},
-         body: JSON.stringify({ instances: [{ prompt }], parameters: { sampleCount: 1 } })
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instances: [{ prompt }], parameters: { sampleCount: 1 } })
       });
+      if (!res.ok) throw new Error(`Imagen Error:${res.status}`);
       const data = await res.json();
-      setRecipeImage(`data:image/png;base64,${data.predictions[0].bytesBase64Encoded}`);
-      */
-      
-      // 代替: 画像生成APIがまだ一般公開されていない場合のためのプレースホルダー
-      // 実際には上記のコメントアウトを外して使用します
-      await new Promise(r => setTimeout(r, 2000)); // 擬似待機
-      setRecipeImage(null); // 画像生成ができない場合はnullのまま（プレビュー画像を表示）
-
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setImageLoading(false);
-    }
+      return `data:image/png;base64,${data.predictions[0].bytesBase64Encoded}`;
+    } catch (e) { console.error(e); return null; }
   };
 
   const generateRecipeWithGemini = async (mode: 'auto' | 'custom') => {
     setLoading(true);
+    setRecipeImage(null);
     if (!apiKey) { alert("APIキーが設定されていません。設定画面でキーを入力してください。"); setLoading(false); return; }
     
-    // 不足リストから除外するアイテムをフィルタリングするための指示を追加
     const inventoryList = items.map((i: any) => `${i.name} (${i.quantity}${i.unit})`).join(', ');
     const ignoredItems = ['水', '氷', 'お湯', '熱湯', 'Water', 'Ice'].join(', ');
 
@@ -524,22 +461,24 @@ function RecipeGenerator({ items, onAddToShoppingList, history, onAddHistory, ap
       const jsonStr = text.match(/\{[\s\S]*\}/)[0];
       const recipeData = JSON.parse(jsonStr);
       
-      // 不足リストのフィルタリング（念のためクライアント側でも実施）
       recipeData.missing = recipeData.missing.filter((m: any) => !['水','氷','お湯'].includes(m.name));
 
       const newRecipe = { id: Date.now().toString(), ...recipeData, mode, createdAt: new Date().toLocaleString(), userRequest: mode === 'custom' ? userRequest : undefined, allMaterials: [...recipeData.ingredients, ...recipeData.missing] };
       onAddHistory(newRecipe);
       setSelectedRecipe(newRecipe);
       
-      // 画像生成（プロンプト作成）
+      // 画像生成
+      setImageLoading(true);
       const imagePrompt = `A photorealistic, high-quality food photography of ${recipeData.title}. Professional lighting, delicious looking.`;
-      generateImage(imagePrompt);
+      const img = await generateImageWithImagen(apiKey, imagePrompt);
+      if(img) setRecipeImage(img);
 
     } catch (error) {
       console.error("Gemini API Error:", error);
       alert("レシピの生成に失敗しました。時間をおいて再試行してください。");
     } finally {
       setLoading(false);
+      setImageLoading(false);
     }
   };
 
@@ -659,7 +598,7 @@ function ScannerModal({ onClose, onScan, apiKey, categoryOptions, addCategoryOpt
 
       try {
         const base64Image = await fileToBase64(imageFile);
-        const prompt = `このレシート画像を解析し、購入された食品アイテムのリストを作成してください。以下のJSON形式のみを出力してください。賞味期限は、もしレシートに日付があればそこから適切に推測するか、食品の一般的な日持ちを考慮して今日からの日付（YYYY-MM-DD）を設定してください。\n\n{\n  "items": [\n    {\n      "name": "食品名",\n      "quantity": 数値（個数など）,\n      "unit": "単位（個、本、パックなど）",\n      "expiryDate": "YYYY-MM-DD",\n      "category": "dairy" | "egg" | "vegetable" | "fruit" | "meat" | "fish" | "other",\n      "emoji": "絵文字"\n    }\n  ]\n}`;
+        const prompt = `このレシート画像を解析し、購入された食品アイテムのリストを作成してください。以下のJSON形式のみを出力してください。賞味期限は、もしレシートに日付があればそこから適切に推測するか、食品の一般的な日持ちを考慮して今日からの日付（YYYY-MM-DD）を設定してください。\n\n{\n  "items": [\n    {\n      "name": "食品名（商品名は一般的な名称に正規化してください。例:「北海道産 牛肉こま切れ」→「牛肉」、「キャベツ 1/2」→「キャベツ」）",\n      "quantity": 数値（個数など）,\n      "unit": "単位（個、本、パックなど）",\n      "expiryDate": "YYYY-MM-DD",\n      "category": "dairy" | "egg" | "vegetable" | "fruit" | "meat" | "fish" | "other",\n      "emoji": "絵文字"\n    }\n  ]\n}`;
 
         const data = await callGeminiWithRetry(apiKey, {
           contents: [{
