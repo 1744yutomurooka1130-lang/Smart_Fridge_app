@@ -12,11 +12,11 @@ interface Recipe { id: string; title: string; time: string; ingredients: RecipeM
 interface ScannedItem extends FoodItem { isSelected: boolean; }
 
 // --- 定数 ---
-const GEMINI_MODEL = "gemini-1.5-flash"; 
-const IMAGEN_MODEL = "imagen-3.0-generate-001";
+const GEMINI_MODEL = "gemini-3-flash-preview"; 
+const IMAGEN_MODEL = "imagen-4.0-generate-001"; // 画像生成用モデル
 const IGNORED_MISSING_ITEMS = ['水', '氷', 'お湯', '熱湯', 'Water', 'Ice', '調味料', '塩', '胡椒', '醤油', '油'];
 
-// --- ヘルパー関数 ---
+// --- ヘルパー ---
 const formatAmountStr = (amount: number|string, unit: string) => { const u=['少々','適量','お好みで','ひとつまみ','適宜']; return u.includes(unit)?unit:`${amount}${unit}`; };
 const fileToBase64 = (file: File): Promise<string> => new Promise((resolve, reject) => { const reader = new FileReader(); reader.readAsDataURL(file); reader.onload = () => resolve((reader.result as string).split(',')[1]); reader.onerror = reject; });
 const loadFromStorage = <T,>(key: string, v: T): T => { try { const i = window.localStorage.getItem(key); return i ? JSON.parse(i) : v; } catch { return v; } };
@@ -35,10 +35,10 @@ const generateImageWithImagen = async (apiKey: string, prompt: string): Promise<
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${IMAGEN_MODEL}:predict?key=${apiKey}`;
   try {
     const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ instances: [{ prompt }], parameters: { sampleCount: 1 } }) });
-    if (!res.ok) throw new Error(`Imagen Error:${res.status}`);
+    if (!res.ok) { console.warn("Imagen API failed", res.status); return null; }
     const data = await res.json();
     return `data:image/png;base64,${data.predictions[0].bytesBase64Encoded}`;
-  } catch (e) { console.error(e); return null; }
+  } catch (e) { console.error("Image generation error:", e); return null; }
 };
 
 // --- データ (圧縮) ---
@@ -56,6 +56,8 @@ const DEFAULT_STOCK_THRESHOLDS: Record<string, number> = { '卵':3, '牛乳':1, 
 // --- アプリ本体 ---
 export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard'|'inventory'|'add'|'recipes'|'shopping'|'settings'>('dashboard');
+  
+  // データの永続化
   const [items, setItems] = useState<FoodItem[]>(() => loadFromStorage('sf_items', INITIAL_ITEMS));
   const [shoppingList, setShoppingList] = useState<ShoppingItem[]>(() => loadFromStorage('sf_shoppingList', INITIAL_SHOPPING_LIST));
   const [recipeHistory, setRecipeHistory] = useState<Recipe[]>(() => loadFromStorage('sf_recipeHistory', []));
