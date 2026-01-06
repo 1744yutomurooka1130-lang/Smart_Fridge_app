@@ -12,8 +12,8 @@ interface Recipe { id: string; title: string; time: string; ingredients: RecipeM
 interface ScannedItem extends FoodItem { isSelected: boolean; }
 
 // --- 定数 ---
-const GEMINI_MODEL = "gemini-3-flash-preview"; 
-const IMAGEN_MODEL = "imagen-4.0-generate-001"; // 画像生成用モデル
+const GEMINI_MODEL = "gemini-1.5-flash"; 
+const IMAGEN_MODEL = "imagen-3.0-generate-001";
 const IGNORED_MISSING_ITEMS = ['水', '氷', 'お湯', '熱湯', 'Water', 'Ice', '調味料', '塩', '胡椒', '醤油', '油'];
 
 // --- ヘルパー関数 ---
@@ -92,7 +92,6 @@ export default function App() {
   useEffect(() => { const savedKey = localStorage.getItem('GEMINI_API_KEY'); if (savedKey) setGeminiApiKey(savedKey); }, []);
   const saveApiKey = (key: string) => { setGeminiApiKey(key); localStorage.setItem('GEMINI_API_KEY', key); showToast('APIキーを保存しました'); };
   const showToast = (msg: string) => { setNotification(msg); setTimeout(() => setNotification(null), 3000); };
-  
   const addCategoryOption = (category: ItemCategory, newOption: string) => { setCategoryOptions((prev:any) => { const c=prev[category]||[]; return !c.includes(newOption) ? {...prev, [category]: [...c, newOption]} : prev; }); };
   const addLocationOption = (storage: StorageType, newOption: string) => { setLocationOptions((prev:any) => { const c=prev[storage]||[]; return !c.includes(newOption) ? {...prev, [storage]: [...c, newOption]} : prev; }); };
   const addUnitOption = (newUnit: string) => { setUnitOptions(prev => !prev.includes(newUnit) ? [...prev, newUnit] : prev); };
@@ -220,13 +219,7 @@ function InventoryList({ items, deleteItem, onAddToShoppingList, lowStockItems, 
        const existingNames = new Set(items.map((i: any) => i.categorySmall || i.name));
        const missingNames = lowStockItems.filter((name: string) => !existingNames.has(name));
        const missingFoodItems: FoodItem[] = missingNames.map((name: string) => {
-         let emoji='📦'; 
-         if(name.includes('牛')||name.includes('豚')||name.includes('肉')) emoji='🥩';
-         else if(name.includes('魚')||name.includes('鮭')) emoji='🐟';
-         else if(name.includes('野菜')||name.includes('キャベツ')) emoji='🥦';
-         else if(name.includes('果物')||name.includes('りんご')) emoji='🍎';
-         else if(name.includes('卵')) emoji='🥚';
-         else if(name.includes('乳')||name.includes('牛乳')) emoji='🥛';
+         let emoji='📦'; for(const[k,v]of Object.entries(EMOJI_KEYWORDS)){if(name.includes(k)){emoji=v;break;}}
          return { id: `temp-${name}`, name, storage: 'ambient', category: 'other', categorySmall: name, location: '', expiryDate: '', quantity: 0, unit: '個', addedDate: '', emoji };
        });
        baseItems = [...baseItems, ...missingFoodItems];
@@ -360,7 +353,7 @@ function AddItemForm({ onAdd, onCancel, categoryOptions, addCategoryOption, expi
     const currentName = isCustomCategory ? customCategoryName : data.categorySmall;
     if (currentName) {
       if (emojiHistory[currentName]) { setData((prev: any) => ({ ...prev, emoji: emojiHistory[currentName] })); return; }
-      // EMOJI_KEYWORDSは使用しない（圧縮のため削除）
+      for (const [key, emoji] of Object.entries(EMOJI_KEYWORDS)) { if (currentName.includes(key)) { setData((prev: any) => ({ ...prev, emoji: emoji })); break; } }
     } else if (data.category) {
       let defaultEmoji = '📦';
       if (data.category === 'dairy') defaultEmoji = '🥛'; else if (data.category === 'egg') defaultEmoji = '🥚'; else if (data.category === 'meat') defaultEmoji = '🥩'; else if (data.category === 'fish') defaultEmoji = '🐟'; else if (data.category === 'vegetable') defaultEmoji = '🥦'; else if (data.category === 'fruit') defaultEmoji = '🍎';
@@ -458,7 +451,7 @@ function AddItemForm({ onAdd, onCancel, categoryOptions, addCategoryOption, expi
                   <select className="w-full p-3 bg-gray-50 rounded-xl border border-gray-200" value={data.unit} onChange={(e) => { if (e.target.value === 'NEW_ENTRY') { setIsCustomUnit(true); setCustomUnitName(''); } else { setData({...data, unit: e.target.value}); } }}>
                     {unitOptions.map((opt: string) => (<option key={opt} value={opt}>{opt}</option>))}<option value="NEW_ENTRY" className="text-blue-600 font-bold">+ 新規追加（リストに登録）</option>
                   </select>
-                ) : (<div className="mb-2 animate-fade-in-up"><div className="flex gap-2"><input type="text" className="w-full p-3 bg-white rounded-xl border-2 border-blue-500 focus:outline-none" placeholder="単位を入力" value={customUnitName} onChange={(e) => setCustomUnitName(e.target.value)} required autoFocus /><button type="button" onClick={() => { setIsCustomUnit(false); setData({...data, unit: '個'}); }} className="px-3 py-2 text-gray-500 bg-gray-100 rounded-lg whitespace-nowrap">戻る</button></div><p className="text-xs text-blue-600 mt-1 ml-1">※この単位はリストに追加されます</p></div>)}
+                ) : (<div className="mb-2 animate-fade-in-up"><div className="flex gap-2"><input type="text" className="w-full p-3 bg-white rounded-xl border-2 border-blue-500 focus:outline-none" placeholder="単位を入力" value={customUnitName} onChange={(e) => setCustomUnitName(e.target.value)} required autoFocus /><button type="button" onClick={() => { setIsCustomUnit(false); setData({...data, unit: '個'}); }} className="px-3 py-2 text-gray-500 bg-gray-100 rounded-lg whitespace-nowrap text-xs">戻る</button></div><p className="text-xs text-blue-600 mt-1 ml-1">※この単位はリストに追加されます</p></div>)}
               </div>
             </div>
             <div>
@@ -484,20 +477,6 @@ function RecipeGenerator({ items, onAddToShoppingList, history, onAddHistory, ap
   const [selectedRecipe, setSelectedRecipe] = useState<any>(null);
   const [recipeImage, setRecipeImage] = useState<string|null>(null);
   const [imageLoading, setImageLoading] = useState(false);
-
-  const generateImageWithImagen = async (apiKey: string, prompt: string): Promise<string | null> => {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${IMAGEN_MODEL}:predict?key=${apiKey}`;
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instances: [{ prompt }], parameters: { sampleCount: 1 } })
-      });
-      if (!res.ok) throw new Error(`Imagen Error:${res.status}`);
-      const data = await res.json();
-      return `data:image/png;base64,${data.predictions[0].bytesBase64Encoded}`;
-    } catch (e) { console.error(e); return null; }
-  };
 
   const generateRecipeWithGemini = async (mode: 'auto' | 'custom') => {
     setLoading(true);
@@ -654,7 +633,7 @@ function ScannerModal({ onClose, onScan, apiKey, categoryOptions, addCategoryOpt
 
       try {
         const base64Image = await fileToBase64(imageFile);
-        const prompt = `このレシート画像を解析し、購入された食品アイテムのリストを作成してください。以下のJSON形式のみを出力してください。商品名（name）は、レシートの記載そのものではなく、一般的な食材名に修正（正規化）してください。例：「北海道産牛肉切り落とし」→「牛肉」、「キャベツ1/2カット」→「キャベツ」、「特選牛乳」→「牛乳」。賞味期限は、もしレシートに日付があればそこから適切に推測するか、食品の一般的な日持ちを考慮して今日からの日付（YYYY-MM-DD）を設定してください。\n\n{\n  "items": [\n    {\n      "name": "食品名",\n      "quantity": 数値（個数など）,\n      "unit": "単位（個、本、パックなど）",\n      "expiryDate": "YYYY-MM-DD",\n      "category": "dairy" | "egg" | "vegetable" | "fruit" | "meat" | "fish" | "other",\n      "emoji": "絵文字"\n    }\n  ]\n}`;
+        const prompt = `このレシート画像を解析し、購入された食品アイテムのリストを作成してください。以下のJSON形式のみを出力してください。商品名（name）は、レシートの記載そのものではなく、一般的な食材名に修正（正規化）してください。例：「北海道産 牛肉こま切れ」→「牛肉」、「キャベツ 1/2」→「キャベツ」、「特選牛乳」→「牛乳」。賞味期限は、もしレシートに日付があればそこから適切に推測するか、食品の一般的な日持ちを考慮して今日からの日付（YYYY-MM-DD）を設定してください。\n\n{\n  "items": [\n    {\n      "name": "食品名",\n      "quantity": 数値（個数など）,\n      "unit": "単位（個、本、パックなど）",\n      "expiryDate": "YYYY-MM-DD",\n      "category": "dairy" | "egg" | "vegetable" | "fruit" | "meat" | "fish" | "other",\n      "emoji": "絵文字"\n    }\n  ]\n}`;
 
         const data = await callGeminiWithRetry(apiKey, {
           contents: [{
