@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles, Image as ImageIcon } from 'lucide-react';
+import React, { useState, useEffect, useMemo, ChangeEvent } from 'react';
+import { Camera, Search, Plus, Calendar, ChefHat, ShoppingCart, AlertTriangle, Check, Trash2, LayoutDashboard, Refrigerator, Snowflake, Sun, Share2, IceCream, Carrot, Settings, Edit3, ArrowUpDown, X, CheckSquare, Square, Minus, MessageSquare, History, ChevronLeft, Clock, TrendingDown, AlertOctagon, Ban, Save, FileText, Loader2, Sparkles, Image as ImageIcon } from 'lucide-react';
 
 // --- 型定義 ---
 type StorageType = 'refrigerator'|'freezer_main'|'freezer_sub'|'vegetable'|'ambient';
@@ -20,6 +20,8 @@ const IGNORED_MISSING_ITEMS = ['水', '氷', 'お湯', '熱湯', 'Water', 'Ice',
 const formatAmountStr = (amount: number|string, unit: string) => { const u=['少々','適量','お好みで','ひとつまみ','適宜']; return u.includes(unit)?unit:`${amount}${unit}`; };
 const fileToBase64 = (file: File): Promise<string> => new Promise((resolve, reject) => { const reader = new FileReader(); reader.readAsDataURL(file); reader.onload = () => resolve((reader.result as string).split(',')[1]); reader.onerror = reject; });
 const loadFromStorage = <T,>(key: string, v: T): T => { try { const i = window.localStorage.getItem(key); return i ? JSON.parse(i) : v; } catch { return v; } };
+
+// APIリトライ関数
 const callGeminiWithRetry = async (apiKey: string, payload: any, retries = 3, delay = 2000): Promise<any> => {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
   for (let i=0; i<=retries; i++) {
@@ -31,7 +33,8 @@ const callGeminiWithRetry = async (apiKey: string, payload: any, retries = 3, de
     } catch (e) { if (i===retries) throw e; await new Promise(r => setTimeout(r, delay)); delay *= 2; }
   }
 };
-// 画像生成関数
+
+// 画像生成関数 (Imagen 3)
 const generateImageWithImagen = async (apiKey: string, prompt: string): Promise<string | null> => {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${IMAGEN_MODEL}:predict?key=${apiKey}`;
   try {
@@ -89,14 +92,11 @@ export default function App() {
   useEffect(() => { localStorage.setItem('sf_expirySettings', JSON.stringify(expirySettings)); }, [expirySettings]);
   useEffect(() => { localStorage.setItem('sf_stockThresholds', JSON.stringify(stockThresholds)); }, [stockThresholds]);
   useEffect(() => { localStorage.setItem('sf_emojiHistory', JSON.stringify(emojiHistory)); }, [emojiHistory]);
-
-  const [inventoryFilterMode, setInventoryFilterMode] = useState<FilterMode>('all');
-  const [showScannerModal, setShowScannerModal] = useState(false);
-  const [notification, setNotification] = useState<string | null>(null);
-
   useEffect(() => { const savedKey = localStorage.getItem('GEMINI_API_KEY'); if (savedKey) setGeminiApiKey(savedKey); }, []);
+
   const saveApiKey = (key: string) => { setGeminiApiKey(key); localStorage.setItem('GEMINI_API_KEY', key); showToast('APIキーを保存しました'); };
   const showToast = (msg: string) => { setNotification(msg); setTimeout(() => setNotification(null), 3000); };
+  
   const addCategoryOption = (category: ItemCategory, newOption: string) => { setCategoryOptions((prev:any) => { const c=prev[category]||[]; return !c.includes(newOption) ? {...prev, [category]: [...c, newOption]} : prev; }); };
   const addLocationOption = (storage: StorageType, newOption: string) => { setLocationOptions((prev:any) => { const c=prev[storage]||[]; return !c.includes(newOption) ? {...prev, [storage]: [...c, newOption]} : prev; }); };
   const addUnitOption = (newUnit: string) => { setUnitOptions(prev => !prev.includes(newUnit) ? [...prev, newUnit] : prev); };
@@ -127,10 +127,10 @@ export default function App() {
   const updateShoppingItemQuantity = (id: string, delta: number) => { setShoppingList(prev => prev.map(item => item.id === id ? { ...item, quantity: Math.max(1, item.quantity + delta) } : item)); };
 
   const lowStockItems = useMemo(() => {
-    const groupedStock: Record<string, number> = {};
+    const g: Record<string, number> = {};
     items.forEach(i => { const k = i.categorySmall || i.name; g[k] = (g[k] || 0) + i.quantity; });
-    const lowStockList: string[] = [];
-    Object.keys(stockThresholds).forEach(k => { if ((groupedStock[k] || 0) < stockThresholds[k]) lowStockList.push(k); });
+    const l: string[] = [];
+    Object.keys(stockThresholds).forEach(k => { if ((g[k] || 0) < stockThresholds[k]) l.push(k); });
     return l;
   }, [items, stockThresholds]);
 
@@ -145,6 +145,10 @@ export default function App() {
   const deleteItem = (id: string) => { setItems(items.filter(i => i.id !== id)); showToast('商品を削除しました'); };
   const exportToKeep = () => { console.log(shoppingList.filter(i => !i.isChecked).map(i => `・${i.name} ${formatAmountStr(i.quantity, i.unit)}`).join('\n')); showToast('Google Keepのリストに追加しました (Demo)'); };
   const updateItem = (updatedItem: FoodItem) => { setItems(prev => prev.map(item => item.id === updatedItem.id ? updatedItem : item)); showToast(`${updatedItem.name} を更新しました`); };
+
+  const [inventoryFilterMode, setInventoryFilterMode] = useState<FilterMode>('all');
+  const [showScannerModal, setShowScannerModal] = useState(false);
+  const [notification, setNotification] = useState<string | null>(null);
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800 font-sans pb-20 md:pb-0 md:pl-64">
@@ -167,7 +171,7 @@ export default function App() {
 
 // --- Components ---
 function Navigation({ activeTab, setActiveTab, counts }: any) {
-  const tabs=[{id:'dashboard',icon:LayoutDashboard,label:'ホーム'},{id:'inventory',icon:Refrigerator,label:'冷蔵庫'},{id:'add',icon:Plus,label:'追加',isAction:true},{id:'recipes',icon:ChefHat,label:'レシピ'},{id:'shopping',icon:ShoppingCart,label:'買い物'},{id:'settings',icon:Settings,label:'設定'}];
+  const tabs = [ { id: 'dashboard', icon: LayoutDashboard, label: 'ホーム' }, { id: 'inventory', icon: Refrigerator, label: '冷蔵庫' }, { id: 'add', icon: Plus, label: '追加', isAction: true }, { id: 'recipes', icon: ChefHat, label: 'レシピ' }, { id: 'shopping', icon: ShoppingCart, label: '買い物' }, { id: 'settings', icon: Settings, label: '設定' }];
   return (
     <>
       <div className="hidden md:flex flex-col w-64 bg-white h-screen fixed left-0 top-0 border-r border-gray-200 shadow-sm z-10">
@@ -652,7 +656,7 @@ function ScannerModal({ onClose, onScan, apiKey, categoryOptions, addCategoryOpt
 
       try {
         const base64Image = await fileToBase64(imageFile);
-        const prompt = `このレシート画像を解析し、購入された食品アイテムのリストを作成してください。以下のJSON形式のみを出力してください。賞味期限は、もしレシートに日付があればそこから適切に推測するか、食品の一般的な日持ちを考慮して今日からの日付（YYYY-MM-DD）を設定してください。\n\n{\n  "items": [\n    {\n      "name": "食品名（商品名は一般的な名称に正規化してください。例:「北海道産 牛肉こま切れ」→「牛肉」、「キャベツ 1/2」→「キャベツ」）",\n      "quantity": 数値（個数など）,\n      "unit": "単位（個、本、パックなど）",\n      "expiryDate": "YYYY-MM-DD",\n      "category": "dairy" | "egg" | "vegetable" | "fruit" | "meat" | "fish" | "other",\n      "emoji": "絵文字"\n    }\n  ]\n}`;
+        const prompt = `このレシート画像を解析し、購入された食品アイテムのリストを作成してください。以下のJSON形式のみを出力してください。商品名（name）は、レシートの記載そのものではなく、一般的な食材名に修正（正規化）してください。例：「北海道産牛肉切り落とし」→「牛肉」、「キャベツ1/2カット」→「キャベツ」、「特選牛乳」→「牛乳」。賞味期限は、もしレシートに日付があればそこから適切に推測するか、食品の一般的な日持ちを考慮して今日からの日付（YYYY-MM-DD）を設定してください。\n\n{\n  "items": [\n    {\n      "name": "食品名",\n      "quantity": 数値（個数など）,\n      "unit": "単位（個、本、パックなど）",\n      "expiryDate": "YYYY-MM-DD",\n      "category": "dairy" | "egg" | "vegetable" | "fruit" | "meat" | "fish" | "other",\n      "emoji": "絵文字"\n    }\n  ]\n}`;
 
         const data = await callGeminiWithRetry(apiKey, {
           contents: [{
